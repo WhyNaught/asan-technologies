@@ -1,14 +1,18 @@
 import httpx
 from fastapi import HTTPException
-from typing import Dict
+from typing import Any, Mapping
+from ..config import API_TIMEOUT
 
 # helper method to call an external endpoint and get a json-formatted string
-def call_external_endpoint(url: str, params: Dict = {}) -> str:
+# this function throws an error if smth goes wrong, make sure to wrap in a try-catch
+def call_external_endpoint(
+    url: str, params: Mapping[str, str | int | float] | None = None
+) -> Any:
     try:
         response = httpx.get(
             url=url,
-            params=params, 
-            timeout=10.0,
+            params=params,
+            timeout=API_TIMEOUT,
         )
         response.raise_for_status()
     except httpx.TimeoutException as exc:
@@ -22,5 +26,9 @@ def call_external_endpoint(url: str, params: Dict = {}) -> str:
             status_code=502, detail="Could not reach data provider"
         ) from exc
 
-    provider_data = response.json()
-    return provider_data
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502, detail="Data provider returned invalid JSON"
+        ) from exc
