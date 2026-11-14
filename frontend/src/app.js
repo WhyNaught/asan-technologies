@@ -1,4 +1,6 @@
 import "./styles.css";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const regions = [
   { id: "lagos", name: "Lagos, Nigeria", short: "Lagos", lat: 6.52, lon: 3.38, tag: "coastal city" },
@@ -95,7 +97,7 @@ function appTemplate() {
         </aside>
         <section class="center-stage">
           <div class="stage-head"><div><div class="crumbs">EXPLORER <span>/</span> ${selectedPhenomenon().category.toUpperCase()}</div><h1>${state.phenomenon}</h1><p>Explore the pattern. Follow the evidence.</p></div><div class="stage-actions"><button class="view-toggle ${state.view === "global" ? "selected" : ""}" data-view="global">◉ Global</button><button class="view-toggle ${state.view === "local" ? "selected" : ""}" data-view="local">⌖ Local</button><button class="round-btn" data-action="toggle-compare">⇄</button></div></div>
-          <div class="map-frame"><canvas id="globe" aria-label="Interactive synthetic Earth visualization"></canvas><div class="map-grid"></div><div class="map-label label-north">N 34° 12′ 08″</div><div class="map-label label-east">E 118° 14′ 37″</div><div class="map-hud"><span class="hud-pill"><i></i> ${state.dataMode.toUpperCase()}</span><span>◈ ${state.view.toUpperCase()} VIEW</span><span>◷ ${years[state.dateIndex]}</span></div><div class="map-controls"><button data-action="zoom-out">−</button><button data-action="reset-globe">◎</button><button data-action="zoom-in">+</button></div><div class="globe-tooltip"><span class="tooltip-line"></span><strong>${state.region.short}</strong><small>${variable.label} <b>${variable.value}</b></small></div><div class="legend"><span>LOW</span><div class="legend-bar"></div><span>HIGH</span><b>${variable.unit}</b></div></div>
+          <div class="map-frame"><div id="globe" aria-label="Interactive textured Earth globe"></div><div class="map-label label-north">N 34° 12′ 08″</div><div class="map-label label-east">E 118° 14′ 37″</div><div class="map-hud"><span class="hud-pill"><i></i> ${state.dataMode.toUpperCase()}</span><span>${state.view.toUpperCase()} VIEW</span><span>◷ ${years[state.dateIndex]}</span></div><div class="map-controls"><button data-action="zoom-out">−</button><button data-action="reset-globe">◎</button><button data-action="zoom-in">+</button></div><div class="globe-tooltip"><span class="tooltip-line"></span><strong>${state.region.short}</strong><small>${variable.label} <b>${variable.value}</b></small></div><div class="legend"><span>LOW</span><div class="legend-bar"></div><span>HIGH</span><b>${variable.unit}</b></div></div>
           <div class="timeline-panel"><div class="timeline-top"><div><span class="eyebrow">TIME MACHINE</span><strong>${years[state.dateIndex]} <span>—</span> Present</strong></div><div class="timeline-mode">${["history", "latest", "forecast", "scenario"].map((mode) => `<button class="${state.dataMode === mode ? "active" : ""}" data-mode="${mode}">${mode}</button>`).join("")}</div><div class="timeline-controls"><button data-action="step-back">‹</button><button class="play-btn ${state.playing ? "playing" : ""}" data-action="toggle-play">${state.playing ? "Ⅱ" : "▶"}</button><button data-action="step-forward">›</button><button data-action="speed">${state.speed}×</button></div></div><div class="range-wrap"><span>2015</span><input type="range" min="0" max="10" value="${state.dateIndex}" id="timeline" /><span>2025</span><div class="event-markers"><i style="left:25%"></i><i style="left:58%"></i><i style="left:80%"></i></div></div><div class="event-row"><span>EVENT MARKERS</span><button data-action="jump-event">2020 · Western heat dome <span>→</span></button><button>2023 · El Niño onset <span>→</span></button><span class="timeline-note">Synthetic fixture · no interpolation shown as observation</span></div></div>
           <div class="chart-panel"><div class="panel-title"><div><span class="eyebrow">TREND DETECTIVE</span><h2>${variable.label} <small>${variable.unit}</small></h2></div><div class="chart-meta"><span class="trend-up">↗ +0.84 / decade</span><button class="text-btn" data-action="expand-chart">View analysis ↗</button></div></div><div class="chart-area"><svg id="trend-chart" viewBox="0 0 760 170" preserveAspectRatio="none" role="img" aria-label="Synthetic trend chart"></svg><div class="chart-axis"><span>2015</span><span>2017</span><span>2019</span><span>2021</span><span>2023</span><span>2025</span></div></div></div>
         </section>
@@ -105,39 +107,44 @@ function appTemplate() {
     </div>`;
 }
 
-function drawGlobe() {
-  const canvas = document.querySelector("#globe");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
-  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
-  const w = rect.width, h = rect.height, cx = w * 0.53, cy = h * 0.51, radius = Math.min(w, h) * 0.36;
-  const glow = ctx.createRadialGradient(cx - radius * .25, cy - radius * .3, radius * .1, cx, cy, radius * 1.15);
-  glow.addColorStop(0, "#183a5f"); glow.addColorStop(.58, "#0b2745"); glow.addColorStop(1, "#07101d");
-  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
-  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.clip();
-  ctx.strokeStyle = "rgba(102, 188, 220, .12)"; ctx.lineWidth = 1;
-  for (let i = -4; i <= 4; i++) { const y = cy + i * radius / 5; ctx.beginPath(); ctx.ellipse(cx, y, radius * Math.sqrt(Math.max(.04, 1 - (i/5) ** 2)), radius * .17, 0, 0, Math.PI * 2); ctx.stroke(); }
-  for (let i = -5; i <= 5; i++) { const x = cx + i * radius / 5; ctx.beginPath(); ctx.ellipse(x, cy, radius * .17, radius * Math.sqrt(Math.max(.04, 1 - (i/5) ** 2)), 0, 0, Math.PI * 2); ctx.stroke(); }
-  const v = selectedVariable();
-  const field = ctx.createRadialGradient(cx - radius * .18, cy + radius * .1, 0, cx, cy, radius);
-  field.addColorStop(0, v.color + "b8"); field.addColorStop(.48, v.color + "35"); field.addColorStop(1, "transparent");
-  ctx.fillStyle = field; ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
-  for (let i = 0; i < 38; i++) {
-    const angle = seeded(i + state.dateIndex) * Math.PI * 2, dist = Math.sqrt(seeded(i * 3.1 + 4)) * radius * .9;
-    const px = cx + Math.cos(angle) * dist, py = cy + Math.sin(angle) * dist * .65;
-    const size = 2 + seeded(i + 8) * 5;
-    ctx.fillStyle = v.color + (i % 3 === 0 ? "c8" : "68"); ctx.beginPath(); ctx.arc(px, py, size, 0, Math.PI * 2); ctx.fill();
-  }
-  regions.forEach((region, i) => {
-    const px = cx + ((region.lon + 10) / 180) * radius * .62, py = cy - region.lat / 90 * radius * .82;
-    ctx.fillStyle = i === regions.indexOf(state.region) ? "#fff" : "#71e5ff"; ctx.shadowColor = "#71e5ff"; ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.arc(px, py, i === regions.indexOf(state.region) ? 5 : 3, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-  });
-  ctx.restore();
-  ctx.strokeStyle = "rgba(94, 210, 255, .33)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = "rgba(115, 228, 255, .7)"; ctx.font = "10px ui-monospace"; ctx.fillText("EARTH OBSERVATORY / SYNTHETIC FIELD", 20, h - 24);
+function mountGlobe() {
+  const host = document.querySelector("#globe");
+  if (!host) return;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, host.clientWidth / host.clientHeight, 0.1, 100);
+  camera.position.set(0, 0.05, 2.45);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
+  renderer.setSize(host.clientWidth, host.clientHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  host.appendChild(renderer.domElement);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enablePan = false; controls.enableDamping = true; controls.dampingFactor = .04;
+  controls.minDistance = 1.65; controls.maxDistance = 3.4; controls.autoRotate = true; controls.autoRotateSpeed = .18;
+  const textureLoader = new THREE.TextureLoader();
+  const globe = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 96, 96),
+    new THREE.MeshPhongMaterial({
+      map: textureLoader.load("https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg"),
+      bumpMap: textureLoader.load("https://threejs.org/examples/textures/planets/earth_normal_2048.jpg"),
+      bumpScale: .025,
+      specular: new THREE.Color("#2e596a"),
+      shininess: 12
+    })
+  );
+  scene.add(globe);
+  const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.035, 64, 64), new THREE.MeshBasicMaterial({ color: "#63d8ff", transparent: true, opacity: .08, side: THREE.BackSide }));
+  scene.add(atmosphere);
+  scene.add(new THREE.AmbientLight("#91b7d0", 1.7));
+  const key = new THREE.DirectionalLight("#f4fbff", 2.4); key.position.set(-3, 2, 4); scene.add(key);
+  const marker = new THREE.Mesh(new THREE.SphereGeometry(.025, 16, 16), new THREE.MeshBasicMaterial({ color: selectedVariable().color }));
+  const lat = state.region.lat * Math.PI / 180, lon = (state.region.lon + 90) * Math.PI / 180;
+  marker.position.set(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)); scene.add(marker);
+  let frame;
+  const animate = () => { frame = requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); };
+  animate();
+  host._dispose = () => { cancelAnimationFrame(frame); controls.dispose(); renderer.dispose(); };
+  host._globe = { camera, controls };
 }
 
 function drawChart() {
@@ -148,7 +155,7 @@ function drawChart() {
   svg.innerHTML = `<defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${selectedVariable().color}" stop-opacity=".35"/><stop offset="1" stop-color="${selectedVariable().color}" stop-opacity="0"/></linearGradient></defs><path class="area" d="M ${area}" fill="url(#chartFill)"/><polyline class="trend-line" points="${line}" fill="none" stroke="${selectedVariable().color}" stroke-width="2.5"/><line class="baseline" x1="0" y1="93" x2="760" y2="93"/><circle cx="${state.dateIndex * 76}" cy="${160 - (points[state.dateIndex].value - min) / (max - min) * 140}" r="5" fill="#fff" stroke="${selectedVariable().color}" stroke-width="3"/>`;
 }
 
-function render() { document.querySelector("#app").innerHTML = appTemplate(); drawGlobe(); drawChart(); bindEvents(); }
+function render() { const oldGlobe = document.querySelector("#globe"); oldGlobe?._dispose?.(); document.querySelector("#app").innerHTML = appTemplate(); mountGlobe(); drawChart(); bindEvents(); }
 
 function bindEvents() {
   document.querySelector("#search")?.addEventListener("input", (event) => { state.query = event.target.value; });
@@ -170,6 +177,11 @@ function bindEvents() {
     if (action === "speed") { state.speed = state.speed >= 4 ? .5 : state.speed * 2; if (state.playing) { clearInterval(state.timer); state.playing = false; } }
     if (action === "jump-event") state.dateIndex = 5;
     if (action === "reset-globe") state.region = regions[0];
+    if (action === "zoom-in" || action === "zoom-out") {
+      const globeHost = document.querySelector("#globe");
+      const camera = globeHost?._globe?.camera;
+      if (camera) camera.position.z = Math.max(1.65, Math.min(3.4, camera.position.z + (action === "zoom-in" ? -.25 : .25)));
+    }
     if (action === "source") alert("Synthetic demo fixture. Real NASA observations can be connected through the EarthSignalAdapter interface without changing visualization components.");
     render();
   }));
@@ -179,7 +191,7 @@ function bindEvents() {
   canvas?.addEventListener("pointerdown", (event) => { dragging = true; canvas.setPointerCapture?.(event.pointerId); });
   canvas?.addEventListener("pointerup", () => { dragging = false; });
   canvas?.addEventListener("pointermove", (event) => { if (dragging) { document.querySelector(".globe-tooltip").style.transform = `translate(${Math.max(-20, Math.min(20, event.movementX))}px, ${Math.max(-20, Math.min(20, event.movementY))}px)`; } });
-  window.addEventListener("resize", drawGlobe, { once: true });
+  window.addEventListener("resize", () => { const host = document.querySelector("#globe"); if (host?._globe) { host._globe.camera.aspect = host.clientWidth / host.clientHeight; host._globe.camera.updateProjectionMatrix(); } });
 }
 
 render();
