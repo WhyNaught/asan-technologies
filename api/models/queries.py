@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class UrbanVariable(str, Enum):
     LAND_SURFACE_TEMPERATURE = "land_surface_temperature"
     AIR_TEMPERATURE = "air_temperature"
+    RELATIVE_HUMIDITY = "relative_humidity"
+    DEW_POINT_TEMPERATURE = "dew_point_temperature"
     NIGHT_LIGHT_RADIANCE = "night_light_radiance"
 
 
@@ -27,7 +29,7 @@ class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coordinates: list[Coordinate] = Field(min_length=1, max_length=50)
-    variables: list[UrbanVariable] = Field(min_length=1, max_length=3)
+    variables: list[UrbanVariable] = Field(min_length=1, max_length=5)
     start_date: date
     end_date: date
 
@@ -73,7 +75,7 @@ class VariableTimeSeries(BaseModel):
     label: str
     unit: str
     cadence: Literal["monthly"]
-    source: Literal["synthetic"]
+    source: Literal["synthetic", "NASA POWER"]
     observations: list[Observation]
 
 # a list of all variable time series for a given coordinate 
@@ -84,7 +86,7 @@ class LocationTimeSeries(BaseModel):
 
 # query response class 
 class QueryResponse(BaseModel):
-    data_mode: Literal["synthetic"]
+    data_mode: Literal["synthetic", "nasa_power", "mixed"]
     requested_period: tuple[date, date]
     locations: list[LocationTimeSeries]
 
@@ -97,8 +99,10 @@ class VariableMetadata(BaseModel):
     unit: str
     cadence: Literal["monthly"]
     description: str
+    source: Literal["synthetic", "NASA POWER"]
+    parameter: str | None = None
 
 
 class VariablesResponse(BaseModel):
-    data_mode: Literal["synthetic"]
+    data_mode: Literal["mixed"]
     variables: list[VariableMetadata]
