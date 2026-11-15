@@ -41,7 +41,7 @@ class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coordinates: list[Coordinate] = Field(min_length=1, max_length=50)
-    variables: list[UrbanVariable] = Field(min_length=1, max_length=12)
+    variables: list[UrbanVariable] = Field(min_length=1, max_length=16)
     start_date: date
     end_date: date
 

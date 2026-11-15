@@ -7,7 +7,8 @@ export const vegetation = ['#894a49', '#cc9d82', '#f3eedb', '#a2bb91', '#466c4a'
 // Colour encodes the data source: teal-to-navy for coarse NASA POWER / NOAA context, plasma for 1 km MODIS detail.
 export const contextRamp = ['#e8f5ee', '#a6dbb8', '#4fb3a3', '#2a7ea6', '#1b3f73'];
 export const detailRamp = ['#0d0887', '#7e03a8', '#cc4778', '#f89540', '#f0f921'];
-export function palette(kind: string, unit: string, source = '') { return source.includes('MODIS') ? detailRamp : unit.includes('NDVI') ? vegetation : kind === 'anomaly' || kind === 'temporal' ? diverging : contextRamp; }
+export const trendRamp = ['#2166ac', '#92c5de', '#f7f7f7', '#f4a582', '#b2182b'];
+export function palette(kind: string, unit: string, source = '') { return unit.endsWith('/decade') ? trendRamp : source.includes('MODIS') ? detailRamp : unit.includes('NDVI') ? vegetation : kind === 'anomaly' || kind === 'temporal' ? diverging : contextRamp; }
 export function colorFor(value: number, domain: [number, number], colors: string[]) {
   const t = Math.max(0, Math.min(0.9999, (value - domain[0]) / (domain[1] - domain[0])));
   return colors[Math.floor(t * colors.length)];

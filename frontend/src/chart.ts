@@ -1,7 +1,7 @@
 import type { Observation } from './types';
 import { analyze } from './analysis';
 export const number = (n: number, digits = 2) => Number.isFinite(n) ? n.toLocaleString('en', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';
-export const signed = (n: number) => `${n > 0 ? '+' : ''}${number(n)}`;
+export const signed = (n: number) => Number.isFinite(n) && n !== 0 && Math.abs(n) < 0.01 ? `${n > 0 ? '+' : ''}${n.toPrecision(2)}` : `${n > 0 ? '+' : ''}${number(n)}`; // tiny slopes (e.g. albedo) must not round to 0.00
 export const dateLabel = (date: string) => new Date(date).toLocaleDateString('en', {month: 'short', year: 'numeric', timeZone: 'UTC'});
 export function renderChart(host: HTMLElement, rows: Observation[], unit: string, date: string, comparison?: {rows: Observation[]; name: string}, seasonal = false, label = 'Observations') {
   const w = Math.max(320, Math.round(host.clientWidth) || 1100), h = 260, left = 64, right = 24, top = 20, bottom = 38;

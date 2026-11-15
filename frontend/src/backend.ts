@@ -45,8 +45,8 @@ async function availableVariables() {
   return catalog;
 }
 
-export async function fetchBackendSeries(variables: Variable[], area: StudyArea): Promise<{ series: Map<string, Observation[]>; field: Map<string, Cell[][]>; sources: Map<string, string> }> {
-  if (!variables.length || variables.length > 3 || variables.some(v => !v.apiId)) throw new Error('Select up to three variables supported by the connected API.');
+export async function fetchBackendSeries(variables: Variable[], area: StudyArea, limit = 3): Promise<{ series: Map<string, Observation[]>; field: Map<string, Cell[][]>; sources: Map<string, string> }> {
+  if (!variables.length || variables.length > limit || variables.some(v => !v.apiId)) throw new Error(`Select up to ${limit} variables supported by the connected API.`);
   const available=await availableVariables();
   if(variables.some(v=>!available.has(v.apiId!)))throw new Error('One or more selected variables are not available from the connected API.');
   const cells = nativeCells(area), samples = cells.length <= MAX_SAMPLES ? cells : Array.from({length: MAX_SAMPLES}, (_, i) => cells[Math.round(i * (cells.length - 1) / (MAX_SAMPLES - 1))]);

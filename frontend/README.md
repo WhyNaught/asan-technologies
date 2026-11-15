@@ -34,6 +34,12 @@ Study areas are sampled on the provider's native grid (0.5° × 0.625°); areas 
 
 Phenomena without a connected real dataset (vegetation/NDVI, sea ice, sea level, aerosols, …) were removed from the catalogue rather than faked; see GitHub issue #3.
 
+## Finding trends
+
+- **Find trends in this area** tests every variable (13 NASA POWER, plus NOAA SST over ocean) for the chosen area and period, then ranks them by Mann-Kendall evidence. A trend counts as significant only if the t-test and Mann-Kendall both pass; ★ marks those that survive a Bonferroni correction for testing many variables.
+- **Map the trend per decade** (legend toggle) colours each grid cell by its own linear trend, showing where the change is happening.
+- **MODIS 1 km** land surface temperature (ORNL DAAC service, no credentials) adds city-scale detail; the first 10-year series for a new place takes about 2 minutes server-side and is then cached in `api/.cache` (`python -m api.prewarm_modis` pre-computes the demo cities).
+
 ## Cesium setup
 
 Set `NEXT_PUBLIC_CESIUM_ION_TOKEN` in `frontend/.env.local` for permitted Cesium ion imagery and World Terrain. Restrict the public token to the app's domains and read-only assets. Without it, the client shows its clearly labeled low-resolution NASA tiled overview and ellipsoid terrain. Do not use the basemap as scientific data. Provider attribution remains visible.
