@@ -83,3 +83,83 @@ test('autoregression uses lagged response and covariates, and tests the time tre
   const withGap = x.filter((_, index) => index !== 30);
   assert.equal(forecastAutoregression(y, [withGap], '2022-12-01').n, 69);
 });
+
+for (let caseIndex = 0; caseIndex < 25; caseIndex++) {
+  test(`linear trend analysis scenario ${caseIndex + 1}`, () => {
+    const slope = (caseIndex % 2 ? 1 : -1) * (0.025 + caseIndex * 0.002);
+    const intercept = caseIndex * 5 - 60;
+    const missingEvery = caseIndex + 3;
+    const rows = observations(slope).map((row, index) => ({
+      ...row,
+      value: index % missingEvery === 0
+        ? Number.NaN
+        : intercept + slope * (Date.parse(row.date) - Date.UTC(2015, 0, 1)) / (365.25 * 86400000),
+    }));
+    const result = analyze(rows);
+    const missing = Math.ceil(rows.length / missingEvery);
+    assert.ok(Math.abs(result.slope - slope * 10) < 1e-7);
+    assert.ok(result.p < 0.001);
+    assert.equal(result.n, rows.length - missing);
+    assert.equal(result.missing, missing);
+  });
+}
+
+for (let caseIndex = 0; caseIndex < 25; caseIndex++) {
+  test(`seasonal cycle and anomaly baseline scenario ${caseIndex + 1}`, () => {
+    const phase = caseIndex % 12, scale = caseIndex + 1, offset = caseIndex * 7;
+    const rows = observations(0).map((row, index) => ({
+      ...row,
+      value: ((index + phase) % 12) * scale + offset,
+    }));
+    const cycle = seasonalCycle(rows);
+    const anomalies = monthlyAnomalies(rows, 2015, 2024);
+    assert.equal(cycle.months, 12);
+    assert.equal(cycle.amplitude, 11 * scale);
+    assert.ok(cycle.p < 0.001);
+    assert.ok(anomalies.every(row => Math.abs(row.value) < 1e-10));
+  });
+}
+
+for (let caseIndex = 0; caseIndex < 25; caseIndex++) {
+  test(`linear forecast interval scenario ${caseIndex + 1}`, () => {
+    const slope = (caseIndex % 2 ? 1 : -1) * (0.03 + caseIndex * 0.004);
+    const intercept = caseIndex * 8 - 100;
+    const rows = Array.from({length: 72}, (_, index) => {
+      const date = new Date(Date.UTC(2015, index, 1)).toISOString().slice(0, 10);
+      return {date, value: intercept + slope * (Date.parse(date) - Date.UTC(2015, 0, 1)) / (365.25 * 86400000)};
+    });
+    const targetDate = '2021-01-01';
+    const prediction = forecastLinearTrend(rows, targetDate, [0.01, 0.05, 0.1][caseIndex % 3]);
+    const expected = intercept + slope * (Date.parse(targetDate) - Date.UTC(2015, 0, 1)) / (365.25 * 86400000);
+    assert.ok(Math.abs(prediction.value - expected) < 1e-7);
+    assert.ok(Number.isFinite(prediction.standardDeviation) && prediction.standardDeviation >= 0);
+    assert.ok(prediction.lower <= prediction.value && prediction.value <= prediction.upper);
+  });
+}
+
+for (let caseIndex = 0; caseIndex < 25; caseIndex++) {
+  test(`autoregression forecast scenario ${caseIndex + 1}`, () => {
+    const rho = 0.2 + (caseIndex % 10) * 0.03;
+    const predictorWeight = 0.2 + Math.floor(caseIndex / 10) * 0.1;
+    const trendPerYear = 0.01 + caseIndex * 0.0004;
+    const predictorRows = Array.from({length: 72}, (_, index) => ({
+      date: new Date(Date.UTC(2015, index, 1)).toISOString().slice(0, 10),
+      value: (0.7 + caseIndex * 0.01) * (Math.sin(index * 0.6) + Math.cos(index * 0.13)),
+    }));
+    const targetRows: {date: string; value: number}[] = [];
+    for (let index = 0; index < predictorRows.length; index++) {
+      const previousY = targetRows[index - 1]?.value ?? 0;
+      const previousX = predictorRows[index - 1]?.value ?? predictorRows[index].value;
+      targetRows.push({
+        date: predictorRows[index].date,
+        value: rho * previousY + predictorWeight * previousX + trendPerYear * index / 12,
+      });
+    }
+    const prediction = forecastAutoregression(targetRows, [predictorRows], '2022-12-01');
+    assert.ok(Math.abs(prediction.slope - trendPerYear * 10) < 1e-6);
+    assert.ok(prediction.p < 0.05);
+    assert.equal(prediction.n, 71);
+    assert.ok(Number.isFinite(prediction.value));
+    assert.ok(prediction.lower <= prediction.value && prediction.value <= prediction.upper);
+  });
+}
