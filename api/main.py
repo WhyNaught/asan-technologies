@@ -1,6 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, HTTPException, Response
 
 from .models.queries import (
     AppEEARSQueryResponse,
@@ -24,6 +25,10 @@ from .services.nasa_appeears import (
     download_appeears_product,
     query_appeears_product,
 )
+from .models.queries import ModisMapRequest, ModisSeriesRequest
+from .services import modis
+from .services.noaa import fetch_oni, fetch_sst_series
+from .models.queries import UrbanVariable
 from .vars import VARIABLES
 
 
@@ -78,6 +83,24 @@ def query_appeears_data(query: AppEEARSRequest) -> AppEEARSQueryResponse:
     return query_appeears_product(query)
 
 
+@app.post("/data/modis/map")
+def modis_map(request: ModisMapRequest) -> dict:
+    """1 km MODIS land surface temperature pixels around a point for one month."""
+    return modis.map_for_month(request.coordinate.latitude, request.coordinate.longitude, request.month, request.half_width_km)
+
+
+@app.post("/data/modis/series")
+def modis_series(request: ModisSeriesRequest) -> dict[str, str]:
+    """Start (or hit the cache for) a monthly area-mean MODIS series; poll /data/modis/series/{job_id}."""
+    return {"job_id": modis.start_series_job(
+        request.coordinate.latitude, request.coordinate.longitude, request.half_width_km, request.start_date, request.end_date)}
+
+
+@app.get("/data/modis/series/{job_id}")
+def modis_series_status(job_id: str) -> dict:
+    return modis.job_status(job_id)
+
+
 # Returns each month in the inclusive date range.
 def _months_between(start_date: date, end_date: date) -> list[date]:
     months = []
@@ -112,27 +135,48 @@ def send_data_query(query: Query) -> QueryResponse:
         if variable in NASA_POWER_PARAMETERS
     ]
     has_nasa_power_variables = bool(nasa_power_parameters)
-    has_synthetic_variables = any(
-        variable not in NASA_POWER_PARAMETERS for variable in query.variables
-    )
-    if has_nasa_power_variables and has_synthetic_variables:
-        data_mode = "mixed"
-    elif has_nasa_power_variables:
+    sources = {VARIABLES[variable]["source"] for variable in query.variables}
+    if "synthetic" in sources:
+        data_mode = "synthetic" if sources == {"synthetic"} else "mixed"
+    elif sources == {"NASA POWER"}:
         data_mode = "nasa_power"
     else:
-        data_mode = "synthetic"
+        data_mode = "observational"
+
+    # NASA POWER is one HTTP call per point; fetch points in parallel.
+    wants_sst = UrbanVariable.SEA_SURFACE_TEMPERATURE in query.variables
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        if has_nasa_power_variables:
+            power_by_point = list(pool.map(
+                lambda c: fetch_monthly_parameters(c, months, nasa_power_parameters),
+                query.coordinates,
+            ))
+        else:
+            power_by_point = [{} for _ in query.coordinates]
+        sst_by_point = (
+            list(pool.map(lambda c: fetch_sst_series(c, months), query.coordinates))
+            if wants_sst else [None for _ in query.coordinates]
+        )
+    oni = fetch_oni(months) if UrbanVariable.NINO34_INDEX in query.variables else {}
+    if wants_sst and all(series is None for series in sst_by_point):
+        raise HTTPException(status_code=404, detail="No ocean sea-surface-temperature data for this area. Choose an area over open water.")
 
     locations = []
-    for coordinate in query.coordinates:
-        nasa_power_data = (
-            fetch_monthly_parameters(coordinate, months, nasa_power_parameters)
-            if has_nasa_power_variables
-            else {}
-        )
+    for coordinate, nasa_power_data, sst in zip(query.coordinates, power_by_point, sst_by_point):
         series = []
         for variable in query.variables:
             metadata = VARIABLES[variable]
             parameter = NASA_POWER_PARAMETERS.get(variable)
+            if variable == UrbanVariable.SEA_SURFACE_TEMPERATURE:
+                if sst is None:
+                    continue  # land / sea-ice cell: no SST observation, omit rather than invent one
+                values = sst
+            elif variable == UrbanVariable.NINO34_INDEX:
+                values = oni
+            elif parameter is not None:
+                values = nasa_power_data[parameter]
+            else:
+                values = {month: _synthetic_value(coordinate, month) for month in months}
             series.append(
                 VariableTimeSeries(
                     variable=variable,
@@ -140,17 +184,7 @@ def send_data_query(query: Query) -> QueryResponse:
                     unit=metadata["unit"],
                     cadence=metadata["cadence"],
                     source=metadata["source"],
-                    observations=[
-                        Observation(
-                            timestamp=month,
-                            value=(
-                                nasa_power_data[parameter][month]
-                                if parameter is not None
-                                else _synthetic_value(coordinate, month)
-                            ),
-                        )
-                        for month in months
-                    ],
+                    observations=[Observation(timestamp=month, value=values[month]) for month in months],
                 )
             )
         locations.append(LocationTimeSeries(coordinate=coordinate, series=series))

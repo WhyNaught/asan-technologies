@@ -85,6 +85,17 @@ class DataQueryTests(unittest.TestCase):
                 "relative_humidity",
                 "dew_point_temperature",
                 "night_light_radiance",
+                "max_air_temperature",
+                "precipitation",
+                "root_zone_soil_wetness",
+                "surface_soil_wetness",
+                "evapotranspiration",
+                "solar_irradiance",
+                "longwave_irradiance",
+                "wind_speed",
+                "surface_albedo",
+                "sea_surface_temperature",
+                "nino34_index",
             },
         )
         air_temperature = next(

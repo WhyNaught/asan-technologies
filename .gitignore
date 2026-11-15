@@ -1,5 +1,12 @@
 **/.env
 **/venv
+**/node_modules
+**/dist
+**/.env.local
+**/public/cesium
 **/__pycache__
 **/.vscode
 **/scratch.txt
+.playwright-mcp/
+
+**/.cache
