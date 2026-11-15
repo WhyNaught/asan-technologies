@@ -116,13 +116,13 @@ def _request_json(
 # helper method to login to NASA APPEEARS
 def _login() -> str:
     username = os.getenv("EARTHDATA_USERNAME")
-    password = os.getenv("EARTH_DATA_PASSWORD")
+    password = os.getenv("EARTHDATA_PASSWORD")
     if not username or not password:
         raise HTTPException(
             status_code=503,
             detail=(
                 "NASA AppEEARS credentials are not configured; set "
-                "APPEEARS_USERNAME and APPEEARS_PASSWORD"
+                "EARTHDATA_USERNAME and EARTHDATA_PASSWORD"
             ),
         )
 
