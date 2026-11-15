@@ -99,7 +99,7 @@ export class EarthMap {
     this.vertices.push(p); this.cursor = p; this.renderDraft();
   }
   // Rectangle: press-drag-release, or click two opposite corners.
-  private down(position: Cartesian2) { if (this.drawing === 'rectangle') { this.downAt = position; if (!this.vertices.length) this.corner = this.pick(position); this.cursor = this.corner; } }
+  private down(position: Cartesian2) { if (this.drawing === 'rectangle') { this.downAt = position; if (!this.vertices.length) { this.corner = this.pick(position); if (!this.corner) this.onProgress('Start the box on the Earth, not in space'); } this.cursor = this.corner; } }
   private move(position: Cartesian2) {
     if (!this.drawing) return;
     this.cursor = this.pick(position) ?? this.cursor; this.renderDraft();

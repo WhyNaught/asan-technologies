@@ -16,7 +16,7 @@ The primary users are hackathon judges, curious non-scientists, explorers, and r
 
 ## Product Purpose
 
-Asan is an interactive Earth System Intelligence platform for exploring environmental phenomena, selecting bounded demo regions, traveling through time, and understanding trends through charts and clearly labeled synthetic signals.
+Asan is an interactive Earth System Intelligence platform for exploring environmental phenomena, selecting regions or the whole Earth, traveling through time, and testing trends in real NASA and NOAA data.
 
 ## Positioning
 
@@ -24,11 +24,10 @@ The product connects phenomenon selection, geographic context, timeline playback
 
 ## Capabilities and Constraints
 
-- Frontend-only implementation.
-- No backend, authentication, database, NASA API calls, model training, or live inference.
-- All synthetic fixtures must be clearly labeled as demo data.
-- The architecture should allow real NASA observations and model outputs to replace the fixtures later.
-- The catalog includes 36 phenomena and three flagship investigation pathways.
+- Vite frontend plus a FastAPI backend (`api/`) that serves real NASA POWER and NOAA data.
+- No synthetic data: phenomena without a real connected dataset are not offered.
+- No authentication, database, model training, or live inference.
+- The catalogue holds 12 phenomena, each backed by real monthly series.
 
 ## Evidence on Hand
 

@@ -24,9 +24,15 @@ Vite proxies `/api` to `http://127.0.0.1:8001`. Override with `ASAN_API_ORIGIN` 
 
 ## Data and analysis
 
-The Urban Heat Islands investigation uses `GET /data/variables` and `POST /data/query` from the connected API. Earth skin temperature, air temperature, relative humidity and dew point are real monthly NASA POWER (MERRA-2 / CERES-derived, modeled) values for 2015–2024; night light radiance is still a labelled synthetic stub. Area analyses sample up to 16 grid centers (POWER's native grid is ~0.5°, so small cities share cells), request each point series in parallel, and compute cosine-latitude-weighted averages in the browser. Trends use least-squares regression (t-test, 95% CI) plus the non-parametric Mann-Kendall test and Sen's slope; seasonal anomalies are on by default so the annual cycle does not mask the trend. Monthly values are autocorrelated, so p-values are indicative, not definitive.
+There is **no synthetic data** in the app. Every variable comes from the connected ASAN API (`GET /data/variables`, `POST /data/query`), which serves:
 
-Drought, El Niño / La Niña, and vegetation-stress examples still use deterministic frontend demonstration data. Other catalogue entries are previews and do not claim measurements. The statistical functions are reusable and separate from the data adapter; reports and CSV downloads identify the data source and study-area sampling method.
+- **NASA POWER** (MERRA-2 / CERES / GPM-corrected): skin, air and max temperature, humidity, dew point, precipitation, root-zone and surface soil wetness, evapotranspiration, solar and longwave irradiance, wind speed, albedo. Monthly, 2015–2024.
+- **NOAA HadISST** (via ERDDAP): sea surface temperature, 1° grid, ocean cells only.
+- **NOAA CPC**: Oceanic Niño Index (Niño 3.4), a global index.
+
+Study areas are sampled on the provider's native grid (0.5° × 0.625°); areas needing more than 49 cells (large boxes, Worldwide) use an even 7 × 7 stratified sample, and results are cosine-latitude weighted in the browser. Trends use least-squares regression (t-test, 95% CI) plus the non-parametric Mann-Kendall test with Sen's slope; seasonal anomalies are on by default. Monthly values are autocorrelated, so p-values are indicative. POWER's temperature, humidity and soil variables are modeled reanalysis, not raw satellite retrievals.
+
+Phenomena without a connected real dataset (vegetation/NDVI, sea ice, sea level, aerosols, …) were removed from the catalogue rather than faked; see GitHub issue #3.
 
 ## Cesium setup
 
