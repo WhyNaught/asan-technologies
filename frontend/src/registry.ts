@@ -2,6 +2,7 @@ import type { Phenomenon, Variable } from './types';
 // Every variable is served by the ASAN API from a real NASA or NOAA dataset (`apiId` = the API variable id).
 const v = (id: string, name: string, unit: string, layer: Variable['layer'], domain: [number, number], apiId: string, source: string): Variable => ({ id, name, unit, layer, domain, global: true, apiId, source });
 export const variables = {
+  modis: v('modis-lst', 'Land surface temperature (MODIS, 1 km)', '°C', 'heat', [-10, 60], 'modis_lst', 'NASA MODIS MOD11A2 (1 km)'),
   temperature: v('temperature', 'Earth skin temperature', '°C', 'heat', [-10, 50], 'earth_skin_temperature', 'NASA POWER'),
   air: v('air', 'Air temperature (2 m)', '°C', 'scalar', [-30, 45], 'air_temperature', 'NASA POWER'),
   tmax: v('tmax', 'Maximum air temperature (2 m)', '°C', 'heat', [-20, 50], 'max_air_temperature', 'NASA POWER'),
@@ -20,8 +21,8 @@ export const variables = {
 };
 const groups: [string, [string, string, Variable[]][]][] = [
   ['Atmosphere', [
-    ['Urban heat islands', 'Investigate how built environments retain heat.', [variables.temperature, variables.air, variables.humidity, variables.dewPoint, variables.albedo]],
-    ['Heatwaves and humid heat', 'Explore prolonged heat and humidity.', [variables.tmax, variables.air, variables.humidity, variables.dewPoint]],
+    ['Urban heat islands', 'Investigate how built environments retain heat.', [variables.modis, variables.temperature, variables.air, variables.humidity, variables.dewPoint, variables.albedo]],
+    ['Heatwaves and humid heat', 'Explore prolonged heat and humidity.', [variables.modis, variables.tmax, variables.air, variables.humidity, variables.dewPoint]],
     ['Monsoon and rainfall shifts', 'Explore changes in seasonal rainfall and humidity.', [variables.precipitation, variables.humidity]],
   ]],
   ['Water', [

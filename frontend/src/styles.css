@@ -192,3 +192,15 @@ button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visi
   .analyzing .legend details,.analyzing .legend .legend-note{display:none}
 }
 @media(max-width:760px){.analyzing .investigation:has(.context)~.legend{left:8px;right:auto;width:min(200px,52vw);bottom:calc(var(--sheet) + 66px)}}
+
+/* Hierarchical layer legend */
+.legend{width:min(320px,calc(100vw - 24px))}
+.legend-title{display:flex;justify-content:space-between;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}.legend-title span{font-weight:400;text-transform:none;letter-spacing:0}
+.legend-layers{list-style:none;margin:0 0 6px;padding:0}
+.legend-layer{padding:8px 0 10px 10px;border-left:4px solid var(--line);margin-bottom:6px}
+.legend-layer.detail{border-left-color:#7e03a8}.legend-layer.context{border-left-color:#2a7ea6}
+.legend-layer .legend-heading{display:flex;align-items:center;gap:8px}.legend-layer .legend-heading strong{flex:1;font-size:13px;line-height:1.25}
+.tier-badge{width:22px;height:10px;border-radius:3px;flex:none}
+.definition.caution{background:#fff3d6;border-left:4px solid #b7791f;padding:8px 10px;border-radius:0 8px 8px 0;color:#4a3410}.definition.caution b{color:#7a4a05}
+@media(min-width:761px){.explorer:not(.analyzing) .legend{left:auto;right:88px;bottom:84px;max-height:calc(100dvh - 190px);overflow-y:auto}}
+body:has(.draw-instructions:not([hidden])) .legend{display:none}

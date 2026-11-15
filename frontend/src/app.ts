@@ -8,10 +8,11 @@ import { ionToken } from './providers';
 import { palette } from './layers';
 import { advance, setPeriod, type TimelineState } from './timeline';
 import { icon } from './icons';
-import { glossary, methodNote } from './glossary';
+import { glossary, methodNote, caution } from './glossary';
 import { startTour, stopTour, type TourStep } from './tour';
 import { fetchBackendSeries } from './backend';
-import type { Phenomenon, StudyArea, Variable, Observation } from './types';
+import { fetchModisMap, fetchModisSeries, modisWindow, MODIS_NAME, type ModisMap } from './modis';
+import type { Phenomenon, StudyArea, Variable, Observation, EnvironmentalLayer } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]!));
@@ -20,7 +21,10 @@ const timeline: TimelineState = {start: 0, end: 119, index: 119, playing: false,
 let phenomenon: Phenomenon | undefined, variable: Variable | undefined, area: StudyArea | undefined;
 let selectedVariables: string[] = [];
 let variablesOpen = false;
-let ready = false, analysisOpen = false, expanded = false, anomalies = true, alpha = 0.05, opacity = 0.65, visible = true;
+let ready = false, analysisOpen = false, expanded = false, anomalies = true, alpha = 0.05, opacity = 0.65;
+const hiddenLayers = new Set<string>();
+let modisMaps = new Map<number, ModisMap>(), modisInflight = new Set<number>(), modisPending = '', modisError = '';
+const isModis = (v?: Variable) => v?.apiId === 'modis_lst';
 let backendSources = new Map<string, string>();
 let dataLoading = false, dataError = '', backendFields = new Map<string, import('./types').Cell[][]>(), requestId = 0;
 let compare = false, compareMode = 'region', comparePlace = 1, compareVariable = '', compareStart = 0, compareEnd = 59;
@@ -73,24 +77,52 @@ let dataPromise: Promise<void> = Promise.resolve();
 function refreshBackendData() { return dataPromise = loadBackendData(); }
 async function loadBackendData() {
   const current=++requestId;
-  dataLoading=false;dataError='';backendFields=new Map();
+  dataLoading=false;dataError='';backendFields=new Map();modisMaps=new Map();modisInflight=new Set();modisPending='';modisError='';
   if(!phenomenon||!area||!selectedVariables.length)return;
-  const selected=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!);
-  dataLoading=true;dataError='';backendFields=new Map();renderControls();updateLayer();renderAnalysis();
+  const selected=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!), regular=selected.filter(v=>!isModis(v)), modis=selected.find(isModis);
+  if(modis)void loadModis(current,modis);
+  if(!regular.length){renderControls();updateLayer();renderAnalysis();return;}
+  dataLoading=true;renderControls();updateLayer();renderAnalysis();
   try{
-    const result=await fetchBackendSeries(selected,area);
+    const result=await fetchBackendSeries(regular,area);
     if(current!==requestId)return;
     for(const [id,rows] of result.series)seriesCache.set(JSON.stringify([id,area]),rows);
-    backendFields=result.field;backendSources=result.sources;dataLoading=false;dataError='';
+    backendFields=result.field;for(const [id,name] of result.sources)backendSources.set(id,name);dataLoading=false;dataError='';
   }catch(error){
     if(current!==requestId)return;
-    for(const v of selected)seriesCache.delete(JSON.stringify([v.id,area]));
+    for(const v of regular)seriesCache.delete(JSON.stringify([v.id,area]));
     dataLoading=false;dataError=(error as Error).message;toast(`Data unavailable: ${dataError}`);
   }
   renderControls();updateLayer();renderAnalysis();
 }
+// MODIS: the 1 km map for the current date loads first (~20 s); the 10-year area-mean series follows (minutes the first time, then cached by the API).
+async function loadModis(current:number,v:Variable){
+  const target=area!;
+  try{
+    const win=modisWindow(target);backendSources.set(v.id,MODIS_NAME);modisPending='starting…';renderControls();renderAnalysis();
+    void ensureModisMap(current);
+    const rows=await fetchModisSeries(win,dates,(done,total)=>{if(current!==requestId)return;modisPending=total?`${done}/${total} NASA requests`:'starting…';const note=document.querySelector('#modis-status');if(note)note.textContent=`MODIS 1 km series: ${modisPending}`;});
+    if(current!==requestId)return;
+    seriesCache.set(JSON.stringify([v.id,target]),rows);modisPending='';
+  }catch(error){
+    if(current!==requestId)return;
+    modisPending='';modisError=(error as Error).message;toast(`MODIS unavailable: ${modisError}`);
+  }
+  renderControls();updateLayer();renderAnalysis();
+}
+async function ensureModisMap(current=requestId){
+  const index=timeline.index;
+  if(!area||modisMaps.has(index)||modisInflight.has(index)||!selectedVariables.some(id=>isModis(phenomenon?.variables.find(v=>v.id===id))))return;
+  modisInflight.add(index);
+  try{
+    const map=await fetchModisMap(modisWindow(area),dates[index]);
+    if(current!==requestId)return;
+    modisMaps.set(index,map);
+  }catch(error){if(current===requestId&&!modisError){modisError=(error as Error).message;toast(`MODIS unavailable: ${modisError}`);}}
+  finally{modisInflight.delete(index);}
+  if(current===requestId&&index===timeline.index)updateLayer();
+}
 function areaLabel(a: StudyArea) {return a.kind === 'point' ? 'Point / grid-cell sample' : a.kind === 'global' ? 'Global spatial average (85°S–85°N)' : 'Area-weighted study-region mean';}
-function layerCells(v:Variable){return backendFields.get(v.id)?.[timeline.index]??[];}
 function selectArea(next: StudyArea) {
   if (next.kind === 'global' && !variable?.global) {toast('This variable supports a point or a selected region.'); return;}
   area = next; if (ready) map.select(area); renderControls(); updateLayer(); renderAnalysis();void refreshBackendData();
@@ -99,7 +131,7 @@ function selectPhenomenon(id: string) {
   phenomenon = phenomena.find(p => p.id === id)!; variable = phenomenon.variables[0]; selectedVariables = [variable.id];variablesOpen=false;
   if (area?.kind === 'global' && !variable.global) area = undefined;
   if (!phenomenon.demo || !area) analysisOpen = false;
-  compareVariable = ''; visible = true; $('#welcome').hidden = true;
+  compareVariable = ''; hiddenLayers.clear(); $('#welcome').hidden = true;
   renderControls(); updateLayer(); renderAnalysis();void refreshBackendData();
 }
 function renderControls() {
@@ -131,18 +163,35 @@ function updateDate() {
   const event=$('.event-label');if(event)event.textContent=eventLabel();
   updateLayer(); if (analysisOpen) drawChart();
 }
+function cellKmOf(cells:{bounds:[number,number,number,number];lat:number}[]){const b=cells[0].bounds;return Math.max((b[2]-b[0])*Math.cos(cells[0].lat*Math.PI/180),b[3]-b[1])*111;}
+/** Layers bottom-to-top: coarse NASA POWER / NOAA context first, MODIS 1 km detail on top. */
+function buildLayers(): EnvironmentalLayer[] {
+  if(!phenomenon||!variable||!area||dataLoading||dataError)return [];
+  const selected=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!);
+  const context=isModis(variable)?selected.find(v=>!isModis(v)&&backendFields.has(v.id)):variable;
+  const layers:EnvironmentalLayer[]=[];
+  if(context&&backendFields.get(context.id)?.[timeline.index]?.length){
+    const cells=backendFields.get(context.id)![timeline.index];
+    layers.push({id:context.id,resolutionKm:cellKmOf(cells),kind:context.layer,unit:context.unit,label:context.name,date:dates[timeline.index],domain:context.domain,opacity,visible:!hiddenLayers.has(context.id),source:backendSources.get(context.id)||context.source,coverage:area.name,cells});
+  }
+  const modis=selected.find(isModis),m=modis&&modisMaps.get(timeline.index);
+  if(modis&&m)layers.push({id:modis.id,resolutionKm:m.cellKm,raster:m.raster,kind:'raster',unit:modis.unit,label:modis.name,date:m.composite,domain:m.domain,opacity,visible:!hiddenLayers.has(modis.id),source:MODIS_NAME,coverage:area.name,cells:m.cells});
+  return layers;
+}
 function updateLayer() {
   const host = $('#legend'); if (!ready) return;
-  if (!phenomenon?.demo || !variable || !area) {host.hidden = true; map.renderLayer(); return;}
-  if(dataLoading||dataError||!backendFields.has(variable.id)){host.hidden=true;map.renderLayer();return;}
-  const cells = layerCells(variable);
-  if (!cells.length) {host.hidden = true; map.renderLayer(); toast('No sample points fall inside this area. Draw a wider study area.'); return;}
-  const colors = palette(variable.layer, variable.unit), b = cells[0].bounds;
-  const cellKm = Math.max((b[2]-b[0])*Math.cos(cells[0].lat*Math.PI/180),b[3]-b[1])*111;
-  map.renderLayer({kind:variable.layer,unit:variable.unit,label:variable.name,date:dates[timeline.index],domain:variable.domain,opacity,visible,source:`${backendSources.get(variable.id)||'NASA / NOAA'} via ASAN API`,coverage:area.name,cells});
+  if (!phenomenon?.demo || !variable || !area) {host.hidden = true; map.renderLayers([]); return;}
+  void ensureModisMap();
+  const layers=buildLayers();
+  map.renderLayers(layers);
+  if(!layers.length){host.hidden=true;if(!dataLoading&&!dataError&&!selectedVariables.some(id=>isModis(phenomenon!.variables.find(v=>v.id===id)))&&backendFields.size)toast('No sample points fall inside this area. Draw a wider study area.');return;}
   host.hidden=false;
-  const fromApi=!!backendFields.get(variable.id);
-  host.innerHTML=`<div class="legend-heading"><strong>${variable.name}</strong><label class="visibility-toggle"><input id="layer-visible" type="checkbox" ${visible?'checked':''}> Show</label></div><div class="color-scale" style="background:linear-gradient(90deg,${colors.join(',')})"></div><div class="legend-values"><span>${variable.domain[0]}</span><span>${variable.unit}</span><span>${variable.domain[1]}</span></div><div class="legend-note">${escape(backendSources.get(variable.id)||'')} · ${dateLabel(dates[timeline.index])} · ~${cellKm<1?number(cellKm,1):Math.round(cellKm)} km sample cells</div><details><summary>Layer details</summary><p>${escape(area.name)} · ${areaLabel(area)}.<br>Sampled at API query coordinates; this is not street-level measurement precision.</p><label>Opacity <input id="layer-opacity" type="range" min="0" max="1" step="0.05" value="${opacity}"></label><p>Source: ${escape(backendSources.get(variable.id)||variable.source)} (real data, served by the ASAN API). Cells are the data provider’s native grid; polygon and rectangle outlines show your study area.</p></details>`;
+  const rows=[...layers].reverse().map((l,i)=>{
+    const colors=palette(l.kind,l.unit,l.source),tier=l.source.includes('MODIS')?'detail':'context',km=l.resolutionKm<1?number(l.resolutionKm,1):Math.round(l.resolutionKm);
+    return `<li class="legend-layer ${tier}"><div class="legend-heading"><span class="tier-badge" style="background:linear-gradient(90deg,${colors[0]},${colors.at(-1)})" aria-hidden="true"></span><strong>${escape(l.label)}</strong><label class="visibility-toggle"><input type="checkbox" data-layer="${l.id}" ${l.visible?'checked':''} aria-label="Show ${escape(l.label)}"> Show</label></div>
+      <div class="color-scale" style="background:linear-gradient(90deg,${colors.join(',')})"></div><div class="legend-values"><span>${l.domain[0]}</span><span>${escape(l.unit)}</span><span>${l.domain[1]}</span></div>
+      <div class="legend-note">${tier==='detail'?'Detail':'Context'} · ${escape(l.source)} · ${dateLabel(l.date)} · ~${km} km cells${i===0&&layers.length>1?' · on top':''}</div></li>`}).join('');
+  host.innerHTML=`<div class="legend-title">Layers <span>${layers.length>1?'top shown first':''}</span></div><ul class="legend-layers">${rows}</ul><details><summary>Layer details</summary><p>${escape(area.name)} · ${areaLabel(area)}. Colour shows the data source, not the variable: <b>blue–green</b> = NASA POWER / NOAA model and analysis grids, <b>purple–yellow</b> = NASA MODIS 1 km satellite pixels.</p><label>Opacity <input id="layer-opacity" type="range" min="0" max="1" step="0.05" value="${opacity}"></label></details>`;
 }
 function periodControls(start=timeline.start,end=timeline.end,prefix='') {
   return `<div class="period-controls" data-prefix="${prefix}"><label>From <input type="month" class="period-start" aria-label="${prefix?'Comparison start':'Study start'} month" min="2015-01" max="2024-12" value="${dates[start].slice(0,7)}"></label><label>To <input type="month" class="period-end" aria-label="${prefix?'Comparison end':'Study end'} month" min="2015-01" max="2024-12" value="${dates[end].slice(0,7)}"></label></div>`;
@@ -158,6 +207,7 @@ function renderAnalysis() {
   if(ready)requestAnimationFrame(()=>{map.viewer.cesiumWidget.resize();map.viewer.scene.requestRender();});
   if(!analysisOpen||!phenomenon?.demo||!area||!variable)return;
   if(dataLoading){host.innerHTML='<div class="analysis-header"><h2>Loading study data</h2><p>Requesting the selected variables for this area and period.</p></div>';return;}
+  if(isModis(variable)&&(modisPending||modisError)){host.innerHTML=`<div class="analysis-header"><div><h2>${escape(variable.name)}</h2><p id="modis-status" role="status">${modisError?escape(modisError):'MODIS 1 km series: '+escape(modisPending)}</p></div><div class="sheet-actions">${button('close-analysis','close','Close analysis')}</div></div><div class="analysis-scroll"><div class="analysis-variable-tabs" aria-label="Map layer"><span>Variable · map layer</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div>${modisError?'':'<p class="definition">NASA limits MODIS requests, so the first time you analyse an area the 10-year series takes a couple of minutes to assemble; after that it is cached. The map layer appears as soon as the first month arrives. You can switch to the other variables meanwhile.</p>'}</div>`;return;}
   const rows=selectedRows();let result:ReturnType<typeof analyze>;
   try{result=analyze(rows,alpha);}catch(e){host.innerHTML=`<div class="analysis-header"><h2>Not enough observations</h2>${button('close-analysis','close','Close analysis')}</div><p>${escape((e as Error).message)}</p>`;return;}
   const other=comparisonData(),otherStats=other&&analyze(other.rows,alpha);
@@ -166,7 +216,7 @@ function renderAnalysis() {
   host.innerHTML=`<div class="sheet-handle"></div><div class="analysis-header"><div><h2>${variable.name}${anomalies?' · seasonal anomalies':''}</h2><p>${escape(area.name)} · ${areaLabel(area)} · ${escape(backendSources.get(variable.id)||'loading')}</p></div><div class="sheet-actions">${button('expand-analysis','expand',expanded?'Reduce analysis workspace':'Expand analysis workspace')}${button('close-analysis','close','Close analysis')}</div></div>
   <div class="analysis-scroll"><div class="analysis-options">${periodControls()}<label class="anomaly-control"><input type="checkbox" id="anomalies" ${anomalies?'checked':''}> Seasonal anomalies</label><button class="text-button" data-action="compare">${icon('compare')}${compare?'Comparing series':'Add comparison'}</button></div>
   ${compare?`<div class="comparison-controls"><label>Compare with <select id="compare-mode">${['period','variable'].filter(m=>m!=='variable'||selectedVariables.length>1).map(m=>`<option value="${m}" ${compareMode===m?'selected':''}>${m==='region'?'Two regions':m==='period'?'Two periods':'Related variables'}</option>`).join('')}</select></label>${compareMode==='region'?`<label>With <select id="compare-place">${places.map((p,i)=>`<option value="${i}" ${i===comparePlace?'selected':''}>${p.name}</option>`).join('')}</select></label>`:compareMode==='period'?periodControls(compareStart,compareEnd,'compare'):`<label>With <select id="compare-variable">${phenomenon!.variables.filter(v=>selectedVariables.includes(v.id)&&v.id!==variable!.id).map(v=>`<option value="${v.id}" ${v.id===other?.variable.id?'selected':''}>${v.name}</option>`).join('')}</select></label>`}${button('remove-compare','close','Remove comparison')}</div>`:''}
-  <div class="analysis-variable-tabs" aria-label="Map layer"><span>Variable · map layer</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div><p class="interpretation">${summary} </p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
+  <div class="analysis-variable-tabs" aria-label="Map layer"><span>Variable · map layer</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div><p class="interpretation">${summary} </p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}${caution[variable.id]?`<p class="definition caution"><b>Caution.</b> ${escape(caution[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
   <div class="metrics"><div><span>${variable.name} · Trend</span><strong>${signed(result.slope)} <small>${variable.unit} / decade</small></strong></div><div><span>Statistical significance</span><strong>p ${result.p<.001?'&lt; 0.001':'= '+number(result.p,3)}</strong><small>${result.significant?'Significant':'Not significant'} at α = ${alpha} · t-test</small></div><div><span>Mann-Kendall (non-parametric)</span><strong>p ${result.mk.p<.001?'&lt; 0.001':'= '+number(result.mk.p,3)}</strong><small>τ = ${number(result.mk.tau,2)} · Sen slope ${signed(result.mk.sen*120)} ${variable.unit}/decade · ${result.mk.p<alpha?'Significant':'Not significant'}</small></div><div><span>95% confidence interval</span><strong>${signed(result.ci[0])} to ${signed(result.ci[1])}</strong><small>${variable.unit} / decade</small></div><div><span>Coverage</span><strong>${rows[0].date.slice(0,4)}–${rows.at(-1)!.date.slice(0,4)}</strong><small>${result.n} monthly observations · ${result.missing} missing</small></div></div>
   ${other&&otherStats?`<p class="comparison-summary"><strong>${escape(other.name)}</strong>: ${signed(otherStats.slope)} ${other.variable.unit}/decade. The trends ${Math.sign(result.slope)===Math.sign(otherStats.slope)?'have the same direction':'have opposite directions'}. Different displayed slopes do not establish a statistically significant difference.${compareMode==='period'?' Periods align by elapsed month.':''}${other.variable.unit!==variable.unit?' The chart uses standardized values for comparable axes; slopes retain original units.':''}</p>`:''}
   <details class="analysis-more"><summary>Correlations & downloads</summary><div id="correlations"></div><div class="report-actions"><button class="text-button" data-action="report">Download scientific report</button><button class="text-button" data-action="csv">Download observations (CSV)</button></div></details><details class="methodology"><summary>How was this calculated?</summary><div class="method-content"><p>Ordinary least squares regresses values against actual elapsed years (365.25 days). Slope × 10 gives units per decade. A two-sided Student-t test of zero slope uses n − 2 degrees of freedom. The 95% confidence interval is slope ± t<sub>0.975</sub> × standard error. Missing values are excluded, never replaced with zero.</p><p>${anomalies?'Seasonal anomalies subtract each calendar month’s 2015–2024 mean, calculated over the complete baseline before filtering the study period.':'Seasonality is retained. Enable seasonal anomalies to subtract each calendar month’s 2015–2024 baseline mean.'} The climatology is estimated from the same demonstration series and may influence trend estimates.</p><p>Study period: ${dateLabel(rows[0].date)}–${dateLabel(rows.at(-1)!.date)}. ${area.kind==='point'?'This is a point/grid-cell sample, not a regional average.':'NASA/NOAA native-grid cells (up to 49, evenly sampled for large areas) inside the study region are weighted by cosine of latitude; polygon edges use center inclusion.'} Global coverage excludes polar caps beyond 85°.</p><p>The test assumes independent, normally distributed errors with constant variance. Temporal autocorrelation and seasonality may understate uncertainty. A trend does not establish causation.</p><label>Significance threshold <select id="alpha">${[.01,.05,.1].map(a=>`<option value="${a}" ${alpha===a?'selected':''}>${a}</option>`).join('')}</select></label><p>${escape(phenomenon.why)}</p></div></details></div>`;
@@ -190,7 +240,7 @@ function download(kind:'report'|'csv') {
   const observations=chosen.map(v=>({v,rows:selectedRows(v),stats:analyze(selectedRows(v),alpha)}));
   const content=kind==='csv'
     ? ['date,variable,value,unit,study_area,observation_type',...dates.slice(timeline.start,timeline.end+1).flatMap((date,i)=>observations.map(({v,rows})=>`${date},"${v.name.replaceAll('"','""')}",${Number.isFinite(rows[i]?.value)?rows[i].value:''},"${v.unit}","${area!.name.replaceAll('"','""')}",${area!.kind}`))].join('\n')
-    : `<!doctype html><meta charset="utf-8"><title>ASAN scientific summary</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:850px;margin:48px auto;padding:0 24px;color:#263235}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}small{color:#65706e}</style><h1>${escape(phenomenon.name)} · Trend summary</h1><p>${escape(area.name)} · ${areaLabel(area)} · ${dates[timeline.start]} to ${dates[timeline.end]}</p><p><b>Data sources:</b> ${chosen.map(v=>escape(v.name)+' ('+escape(backendSources.get(v.id)||v.source)+')').join(', ')}. All values are real NASA/NOAA data served by the ASAN API.</p><table><thead><tr><th>Variable</th><th>Trend / decade</th><th>p-value (t-test)</th><th>Mann-Kendall p</th><th>95% CI</th><th>Observations</th></tr></thead><tbody>${observations.map(({v,rows,stats})=>`<tr><td>${escape(v.name)} (${escape(v.unit)})</td><td>${signed(stats.slope)}</td><td>${number(stats.p,4)}</td><td>${number(stats.mk.p,4)}</td><td>${signed(stats.ci[0])} to ${signed(stats.ci[1])}</td><td>${stats.n} of ${rows.length}</td></tr>`).join('')}</tbody></table>${chosen.length>1?`<h2>Pairwise Pearson correlation</h2>${chosen.flatMap((a,i)=>chosen.slice(i+1).map(b=>{const c=correlate(selectedRows(a),selectedRows(b));return `<p>${escape(a.name)} and ${escape(b.name)}: r = ${number(c.r,3)}, p = ${number(c.p,4)} (n = ${c.n}). Association does not establish causation.</p>`})).join('')}`:''}<h2>Methods and limitations</h2><p>Linear least-squares regression against elapsed time; slopes are expressed per decade. Two-sided Student t test of zero slope with n − 2 degrees of freedom; confidence interval is 95%. Missing values are excluded. ${area.kind==='point'?'Point/grid-cell sample; not a regional mean.':'Area mean from cosine-latitude weighted sampled grid-cell centers.'} The test assumes independent errors; temporal autocorrelation can understate uncertainty. ${anomalies?'Monthly anomalies use the 2015–2024 calendar-month baseline.':'Seasonality has not been removed.'} Correlations are unadjusted and descriptive.</p><small>Generated by ASAN Earth System Explorer · ${new Date().toISOString()}</small>`;
+    : `<!doctype html><meta charset="utf-8"><title>ASAN scientific summary</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:850px;margin:48px auto;padding:0 24px;color:#263235}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}small{color:#65706e}</style><h1>${escape(phenomenon.name)} · Trend summary</h1><p>${escape(area.name)} · ${areaLabel(area)} · ${dates[timeline.start]} to ${dates[timeline.end]}</p><p><b>Data sources:</b> ${chosen.map(v=>escape(v.name)+' ('+escape(backendSources.get(v.id)||v.source)+')').join(', ')}. All values are real NASA/NOAA data served by the ASAN API.</p><table><thead><tr><th>Variable</th><th>Trend / decade</th><th>p-value (t-test)</th><th>Mann-Kendall p</th><th>95% CI</th><th>Observations</th></tr></thead><tbody>${observations.map(({v,rows,stats})=>`<tr><td>${escape(v.name)} (${escape(v.unit)})</td><td>${signed(stats.slope)}</td><td>${number(stats.p,4)}</td><td>${number(stats.mk.p,4)}</td><td>${signed(stats.ci[0])} to ${signed(stats.ci[1])}</td><td>${stats.n} of ${rows.length}</td></tr>`).join('')}</tbody></table>${chosen.length>1?`<h2>Pairwise Pearson correlation</h2>${chosen.flatMap((a,i)=>chosen.slice(i+1).map(b=>{const c=correlate(selectedRows(a),selectedRows(b));return `<p>${escape(a.name)} and ${escape(b.name)}: r = ${number(c.r,3)}, p = ${number(c.p,4)} (n = ${c.n}). Association does not establish causation.</p>`})).join('')}`:''}<h2>Methods and limitations</h2>${chosen.filter(v=>caution[v.id]).map(v=>`<p><b>Caution (${escape(v.name)}):</b> ${escape(caution[v.id])}</p>`).join('')}<p>Linear least-squares regression against elapsed time; slopes are expressed per decade. Two-sided Student t test of zero slope with n − 2 degrees of freedom; confidence interval is 95%. Missing values are excluded. ${area.kind==='point'?'Point/grid-cell sample; not a regional mean.':'Area mean from cosine-latitude weighted sampled grid-cell centers.'} The test assumes independent errors; temporal autocorrelation can understate uncertainty. ${anomalies?'Monthly anomalies use the 2015–2024 calendar-month baseline.':'Seasonality has not been removed.'} Correlations are unadjusted and descriptive.</p><small>Generated by ASAN Earth System Explorer · ${new Date().toISOString()}</small>`;
   const url=URL.createObjectURL(new Blob([content],{type:kind==='csv'?'text/csv':'text/html'})),link=document.createElement('a');link.href=url;link.download=`asan-${phenomenon.id}-${kind}.${kind==='csv'?'csv':'html'}`;link.click();URL.revokeObjectURL(url);
 }
 function openAnalysis() {
@@ -223,7 +273,7 @@ async function geocode() {
 }
 function settings(periodOnly=false) {
   const dialog=$<HTMLDialogElement>('#settings');
-  dialog.innerHTML=`<div class="dialog-heading"><h2 id="settings-title">${periodOnly?'Study period':'Map & exploration'}</h2>${button('close-settings','close','Close settings')}</div><div class="settings-content"><h3>Time range</h3>${periodControls()}<div id="period-error" class="form-error" role="status"></div><label>Playback steps<select id="playback-step"><option value="1" ${timeline.step===1?'selected':''}>Monthly</option><option value="12" ${timeline.step===12?'selected':''}>Annual</option></select></label><button class="text-button" data-action="reset-time">${icon('reset')}Reset to start of period</button>${periodOnly?'':`<h3>Basemap</h3><div class="settings-buttons"><button data-action="satellite">Satellite</button><button data-action="clean-map">Clean map</button></div><p>${ionToken?'Ion token configured. Satellite and World Terrain require access to the selected assets.':'NASA tiled overview and ellipsoid terrain are active. Add an ion token for high-resolution imagery and Cesium World Terrain.'}</p><details><summary>Provider setup & attribution</summary><p>Create an account at <a href="https://ion.cesium.com/tokens" target="_blank" rel="noopener">Cesium ion</a>. In <code>frontend/.env.local</code>, set <code>NEXT_PUBLIC_CESIUM_ION_TOKEN</code>, then restart or rebuild. Restrict the public token to allowed domains and read-only assets. Set <code>NEXT_PUBLIC_CESIUM_IMAGERY_ASSET_ID</code> to a permitted imagery asset.</p><p>Without ion, NASA GIBS Blue Marble is an overview only (maximum tile level 8), not local satellite detail. OpenStreetMap is a separate cartographic style. Provider credits stay accessible on the map. Imagery is context, never scientific measurements.</p><p>Map loading failure never substitutes a static image. Use another provider or correct your credentials.</p></details><h3>Map navigation</h3><p>Drag to rotate or pan. Scroll or pinch to zoom. Middle-drag / Ctrl-drag to tilt. Use the toolbar to zoom, tilt, reset, and select a study area.</p><p>Ctrl/⌘ K opens search. Escape closes the top overlay or cancels drawing. Polygon: click vertices, then Finish or right-click.</p>`}</div>`;
+  dialog.innerHTML=`<div class="dialog-heading"><h2 id="settings-title">${periodOnly?'Study period':'Map & exploration'}</h2>${button('close-settings','close','Close settings')}</div><div class="settings-content"><h3>Time range</h3>${periodControls()}<div id="period-error" class="form-error" role="status"></div><label>Playback steps<select id="playback-step"><option value="1" ${timeline.step===1?'selected':''}>Monthly</option><option value="12" ${timeline.step===12?'selected':''}>Annual</option></select></label><button class="text-button" data-action="reset-time">${icon('reset')}Reset to start of period</button>${periodOnly?'':`<h3>Basemap</h3><div class="settings-buttons"><button data-action="satellite">Satellite</button><button data-action="clean-map">Clean map</button></div><p class="imagery-note">Imagery is context only, not scientific data. Credits: Cesium ion / NASA GIBS / OpenStreetMap contributors.</p><h3>Map navigation</h3><p>Drag to rotate or pan. Scroll or pinch to zoom. Middle-drag / Ctrl-drag to tilt. Use the toolbar to zoom, tilt, reset, and select a study area.</p><p>Ctrl/⌘ K opens search. Escape closes the top overlay or cancels drawing. Polygon: click vertices, then Finish or right-click.</p>`}</div>`;
   dialog.showModal();
 }
 function changePeriod(control:HTMLElement) {
@@ -265,7 +315,7 @@ document.addEventListener('input',event=>{
   const el=event.target as HTMLInputElement;
   if(el.id==='palette-search'){query=el.value;remote=[];renderPaletteResults();}
   if(el.id==='time-scrubber'||el.id==='analysis-time'){timeline.index=Number(el.value);updateDate();}
-  if(el.id==='layer-opacity'){opacity=Number(el.value);if(ready&&variable&&area)map.renderLayer({kind:variable.layer,unit:variable.unit,label:variable.name,date:dates[timeline.index],domain:variable.domain,opacity,visible,source:`${backendSources.get(variable.id)||'NASA / NOAA'} via ASAN API`,coverage:area.name,cells:layerCells(variable)});}
+  if(el.id==='layer-opacity'){opacity=Number(el.value);updateLayer();}
 });
 document.addEventListener('change',event=>{
   const el=event.target as HTMLInputElement;
@@ -277,10 +327,11 @@ document.addEventListener('change',event=>{
     renderControls();updateLayer();renderAnalysis();void refreshBackendData();return;
   }
   if(el.matches('.period-start,.period-end')){changePeriod(el.closest<HTMLElement>('.period-controls')!);return;}
+  if(el.dataset.layer){el.checked?hiddenLayers.delete(el.dataset.layer):hiddenLayers.add(el.dataset.layer);updateLayer();return;}
   switch(el.id){
     case 'variable':variable=phenomenon!.variables.find(v=>v.id===el.value)!;if(area?.kind==='global'&&!variable.global){area=undefined;analysisOpen=false;}compareVariable='';renderControls();updateLayer();renderAnalysis();break;
     case 'anomalies':anomalies=el.checked;renderAnalysis();break;case 'alpha':alpha=Number(el.value);renderAnalysis();$('#analysis .methodology').setAttribute('open','');break;
-    case 'layer-visible':visible=el.checked;updateLayer();break;case 'playback-speed':timeline.speed=Number(el.value);updatePlayback();break;case 'playback-step':timeline.step=Number(el.value) as 1|12;renderTimeline();break;
+    case 'playback-step-placeholder':break;case 'playback-speed':timeline.speed=Number(el.value);updatePlayback();break;case 'playback-step':timeline.step=Number(el.value) as 1|12;renderTimeline();break;
     case 'compare-mode':compareMode=el.value;renderAnalysis();break;case 'compare-place':comparePlace=Number(el.value);renderAnalysis();break;case 'compare-variable':compareVariable=el.value;renderAnalysis();break;
   }
 });
@@ -296,19 +347,19 @@ for(const dialog of document.querySelectorAll('dialog'))dialog.addEventListener(
 {let resizeTimer:number|undefined;window.addEventListener('resize',()=>{window.clearTimeout(resizeTimer);resizeTimer=window.setTimeout(()=>{if(analysisOpen&&phenomenon&&area&&variable)drawChart();},150);});}
 window.addEventListener('pagehide',()=>{if(playTimer)clearInterval(playTimer);map.destroy();});
 function runTour() {
-  const phoenix = places[0], vars = ['temperature', 'air', 'dew-point'];
+  const phoenix = places[0], vars = ['modis-lst', 'temperature', 'dew-point'];
   const stats = () => { try { return analyze(selectedRows()); } catch { return undefined; } };
   const steps: TourStep[] = [
     { title: 'You are an Earth system detective', body: () => '<p>Satellites and NASA models record our planet every month. Your job: pick a place, pick a clue (a measured variable), and decide whether it is <b>really changing</b> — or just wobbling randomly.</p><p>We will investigate: <b>is Phoenix, Arizona — one of the fastest-growing cities in the US — getting hotter?</b></p>',
       run: () => { analysisOpen = false; compare = false; selectPhenomenon('urban-heat-islands'); selectArea(phoenix); if (ready) map.flyTo(phoenix); } },
-    { title: 'Choose your clues', body: () => '<p>We picked three variables from <b>NASA POWER</b> (monthly, 2015–2024): <b>earth skin temperature</b>, <b>air temperature</b> and <b>dew point</b>. The yellow squares on the map are real NASA grid cells (about 50 km wide) covering the study area.</p><p>Open <i>Variables</i> in the panel to add more clues.</p>',
+    { title: 'Choose your clues', body: () => '<p>We picked three variables: <b>MODIS land surface temperature</b> (NASA satellite, 1 km pixels), <b>earth skin temperature</b> and <b>dew point</b> (NASA POWER model, ~55 km cells).</p><p>On the map, <b>purple–yellow</b> pixels are MODIS and <b>blue–green</b> cells are NASA POWER — colour tells you the data source. The legend lists layers coarse-to-fine; tick a layer off to compare.</p>',
       run: async () => { selectedVariables = vars; variable = phenomenon!.variables.find(v => v.id === 'temperature')!; renderControls(); await refreshBackendData(); updateLayer(); } },
     { title: 'Remove the seasons', body: () => '<p>Summer is always hotter than winter — that huge wave hides any slow change. <b>Seasonal anomalies</b> subtract each month’s normal value, so what is left is how unusual each month was. The dashed line is the best straight-line trend through them.</p>',
       run: () => { anomalies = true; openAnalysis(); } },
     { title: 'Is the trend real?', body: () => { const r = stats(); if (!r) return '<p>Not enough data.</p>'; return `<p>Skin temperature in Phoenix changed by <b>${signed(r.slope)} °C per decade</b> (95% confidence: ${signed(r.ci[0])} to ${signed(r.ci[1])}).</p><p>t-test p = <b>${number(r.p, 3)}</b>; Mann-Kendall p = <b>${number(r.mk.p, 3)}</b>. ${r.significant && r.mk.p < r.alpha ? 'Both are below 0.05, so this is a <b>significant</b> trend.' : 'Both are above 0.05, so we <b>cannot rule out random variation</b> — a finding in itself. Ten years is short; climate trends often need longer records.'}</p>`; },
       run: () => { anomalies = true; renderAnalysis(); } },
-    { title: 'Cross-check another clue', body: () => { const r = stats(); return `<p>Now looking at <b>dew point</b> (how muggy the air is): ${r ? `${signed(r.slope)} °C per decade, Mann-Kendall p = ${number(r.mk.p, 3)}` : 'not enough data'}. Different variables can trend in different directions in the same place — switch between them with the tabs above the chart.</p>`; },
-      run: () => { variable = phenomenon!.variables.find(v => v.id === 'dew-point')!; updateLayer(); renderAnalysis(); } },
+    { title: 'Cross-check with satellite data', body: () => { const r = stats(); return `<p>Now <b>MODIS</b>, an independent satellite measurement: ${r ? `${signed(r.slope)} °C per decade, Mann-Kendall p = ${number(r.mk.p, 3)}` : 'not enough data'}.</p><p>Do the two sources agree? If not, ask why — <b>Terra’s orbit drifted earlier after ~2020</b>, which cools its daytime readings, so a falling MODIS trend may be a sensor artefact. Good detectives check their instruments.</p>`; },
+      run: async () => { variable = phenomenon!.variables.find(v => v.id === 'modis-lst')!; for (let i = 0; i < 40 && modisPending; i++) await new Promise(r => setTimeout(r, 500)); updateLayer(); renderAnalysis(); } },
     { title: 'Now it’s your case', body: () => '<p>Try <b>Lagos</b>, <b>Tokyo</b> or <b>Toronto</b> (search any place or draw your own area), switch variables, change the study period, then download the CSV or report to share your evidence.</p>',
       run: () => { variable = phenomenon!.variables.find(v => v.id === 'temperature')!; updateLayer(); renderAnalysis(); } },
   ];

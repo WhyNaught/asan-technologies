@@ -8,3 +8,5 @@
 **/.vscode
 **/scratch.txt
 .playwright-mcp/
+
+**/.cache

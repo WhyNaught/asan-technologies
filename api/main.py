@@ -25,6 +25,8 @@ from .services.nasa_appeears import (
     download_appeears_product,
     query_appeears_product,
 )
+from .models.queries import ModisMapRequest, ModisSeriesRequest
+from .services import modis
 from .services.noaa import fetch_oni, fetch_sst_series
 from .models.queries import UrbanVariable
 from .vars import VARIABLES
@@ -79,6 +81,24 @@ def request_appeears_data(query: AppEEARSRequest) -> Response:
 @app.post("/data/appeears/query", response_model=AppEEARSQueryResponse)
 def query_appeears_data(query: AppEEARSRequest) -> AppEEARSQueryResponse:
     return query_appeears_product(query)
+
+
+@app.post("/data/modis/map")
+def modis_map(request: ModisMapRequest) -> dict:
+    """1 km MODIS land surface temperature pixels around a point for one month."""
+    return modis.map_for_month(request.coordinate.latitude, request.coordinate.longitude, request.month, request.half_width_km)
+
+
+@app.post("/data/modis/series")
+def modis_series(request: ModisSeriesRequest) -> dict[str, str]:
+    """Start (or hit the cache for) a monthly area-mean MODIS series; poll /data/modis/series/{job_id}."""
+    return {"job_id": modis.start_series_job(
+        request.coordinate.latitude, request.coordinate.longitude, request.half_width_km, request.start_date, request.end_date)}
+
+
+@app.get("/data/modis/series/{job_id}")
+def modis_series_status(job_id: str) -> dict:
+    return modis.job_status(job_id)
 
 
 # Returns each month in the inclusive date range.

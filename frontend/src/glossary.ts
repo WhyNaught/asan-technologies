@@ -1,5 +1,6 @@
 // Plain-language definitions for students and general audiences, keyed by variable id.
 export const glossary: Record<string, string> = {
+  'modis-lst': 'Daytime ground temperature measured from space by NASA’s MODIS sensor at about 1 km resolution (8-day composites; cloudy pixels are left out). Far sharper than the ~55 km model grid, so it shows hot and cool neighbourhoods inside a city.',
   temperature: 'How hot the ground itself is (not the air above it). Cities with lots of pavement and few plants usually have a higher skin temperature.',
   air: 'The temperature of the air about 2 m above the ground — what a weather thermometer in the shade reads.',
   humidity: 'How much water vapour the air holds compared with the most it could hold at that temperature. High humidity makes heat feel worse.',
@@ -21,3 +22,7 @@ export const glossary: Record<string, string> = {
   wind: 'Average wind speed 10 metres above the ground.',
 };
 export const methodNote = 'A trend is “significant” when it is unlikely (below the chosen α, usually 5%) to be just random ups and downs. The t-test assumes a straight-line trend with bell-shaped noise; the Mann-Kendall test makes no such assumption and only asks whether values tend to rise or fall over time.';
+// Variable-specific warnings shown next to the trend verdict.
+export const caution: Record<string, string> = {
+  'modis-lst': 'Terra’s overpass time has drifted earlier since about 2020, which cools its daytime readings, so multi-year MODIS trends (especially a falling one) can be sensor artefacts rather than real change. Trust MODIS for spatial patterns inside a city and for the seasonal cycle, and cross-check any trend against NASA POWER skin temperature.',
+};

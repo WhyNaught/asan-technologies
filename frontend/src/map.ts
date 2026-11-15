@@ -9,8 +9,8 @@ export class EarthMap {
   private drawing: 'rectangle' | 'polygon' | null = null;
   private vertices: Coordinate[] = [];
   private preview?: Entity;
-  private lastLayer?: EnvironmentalLayer;
-  private tooClose = false;
+  private lastLayers: EnvironmentalLayer[] = [];
+  private hidden = '';
   private style: 'satellite' | 'map' = 'satellite';
   constructor(private element: HTMLElement, private onSelect: (area: StudyArea) => void, private onStatus: (text: string, error?: boolean) => void, private onReadout: (text: string, scale: string) => void, private onDrawEnd: () => void) {}
   async initialize() {
@@ -181,7 +181,10 @@ export class EarthMap {
     }
     this.viewer.scene.requestRender();
   }
-  renderLayer(layer?: EnvironmentalLayer) { this.lastLayer = layer; if (!layer) this.layers.clear(); else this.layers.render({...layer, visible: layer.visible && !this.tooClose}); }
+  renderLayers(layers: EnvironmentalLayer[]) { this.lastLayers = layers; this.drawLayers(); }
+  /** A layer is hidden once the camera is closer than ~its own cell size (the grid would be misread as street-level data). */
+  private tooClose(layer: EnvironmentalLayer) { return this.viewer.camera.positionCartographic.height < layer.resolutionKm * 1000 * 0.8; }
+  private drawLayers() { this.layers.render(this.lastLayers.map(l => ({...l, visible: l.visible && !this.tooClose(l)}))); }
   private readout() {
     const C = this.C, canvas = this.viewer.scene.canvas;
     const center = this.pick(new C.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2));
@@ -193,10 +196,12 @@ export class EarthMap {
       scale = d > 1000 ? `${Math.round(d / 1000).toLocaleString()} km` : `${Math.round(d)} m`;
     }
     this.onReadout(center ? `${Math.abs(center[1]).toFixed(2)}° ${center[1] >= 0 ? 'N' : 'S'}  ${Math.abs(center[0]).toFixed(2)}° ${center[0] >= 0 ? 'E' : 'W'}` : 'Earth view', scale);
-    if (this.lastLayer?.cells.length) {
-      const cell = this.lastLayer.cells[0];
-      const close = this.viewer.camera.positionCartographic.height < Math.max(cell.bounds[2] - cell.bounds[0], cell.bounds[3] - cell.bounds[1]) * 111000 * 0.8;
-      if (close !== this.tooClose) { this.tooClose = close; this.layers.render({...this.lastLayer, visible: this.lastLayer.visible && !close}); this.onStatus(close ? 'Measurement layer hidden at this zoom · grid is too coarse for street-level interpretation' : (ionToken ? 'Satellite imagery · Cesium World Terrain' : 'NASA overview · ellipsoid terrain')); }
+    if (this.lastLayers.length) {
+      const hidden = this.lastLayers.filter(l => this.tooClose(l)).map(l => l.id).join();
+      if (hidden !== this.hidden) {
+        this.hidden = hidden; this.drawLayers();
+        this.onStatus(hidden ? 'Some layers hidden at this zoom · their grid is too coarse for street-level interpretation' : (ionToken ? 'Satellite imagery · Cesium World Terrain' : 'NASA overview · add ion token for detailed imagery + 3D terrain'));
+      }
     }
   }
   focus() { this.viewer.scene.canvas.focus(); }

@@ -186,3 +186,34 @@ class VariableMetadata(BaseModel):
 class VariablesResponse(BaseModel):
     data_mode: Literal["mixed"]
     variables: list[VariableMetadata]
+
+
+class ModisMapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    coordinate: Coordinate
+    half_width_km: int = Field(ge=0, le=50)
+    month: date
+
+    @model_validator(mode="after")
+    def validate_month(self) -> "ModisMapRequest":
+        if self.month.day != 1:
+            raise ValueError("month must be the first day of a month")
+        return self
+
+
+class ModisSeriesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    coordinate: Coordinate
+    half_width_km: int = Field(ge=0, le=50)
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "ModisSeriesRequest":
+        if self.start_date.day != 1 or self.end_date.day != 1 or self.start_date > self.end_date:
+            raise ValueError("start_date and end_date must be month starts with start_date <= end_date")
+        if (self.end_date.year - self.start_date.year) * 12 + self.end_date.month - self.start_date.month + 1 > 120:
+            raise ValueError("The requested period cannot exceed 120 months")
+        return self
