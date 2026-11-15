@@ -12,7 +12,18 @@ export function nativeCells(area: StudyArea): Omit<Cell, 'value'>[] {
     const lat = Math.max(-89.75, Math.min(89.75, Math.round(c.lat / DLAT) * DLAT)), lon = Math.round(c.lon / DLON) * DLON;
     return [`${lat},${lon}`, {lat, lon, bounds: [lon - DLON / 2, lat - DLAT / 2, lon + DLON / 2, lat + DLAT / 2]}];
   };
-  const unique = new Map(grid(area).map(snap));
+  // Every native cell overlapping the area (not a coarse 8x8 probe), so coverage has no holes.
+  const unique = new Map<string, Omit<Cell, 'value'>>();
+  if (area.kind === 'point') for (const c of grid(area)) unique.set(...snap(c));
+  else if (area.kind === 'region') {
+    const b = area.bounds!;
+    for (let i = Math.floor(b[1] / DLAT); i <= Math.ceil(b[3] / DLAT); i++) for (let j = Math.floor(b[0] / DLON); j <= Math.ceil(b[2] / DLON); j++) {
+      const lat = i * DLAT, lon = j * DLON; // cell centres sit on multiples of the grid step
+      if (lat + DLAT / 2 < b[1] || lat - DLAT / 2 > b[3] || lon + DLON / 2 < b[0] || lon - DLON / 2 > b[2]) continue;
+      if (!area.polygon || inside([lon, lat], area.polygon) || area.polygon.some(v => Math.abs(v[0] - lon) <= DLON / 2 && Math.abs(v[1] - lat) <= DLAT / 2)) unique.set(...snap({lon, lat, bounds: [0, 0, 0, 0]}));
+    }
+    if (!unique.size) for (const c of grid(area).slice(0, 1)) unique.set(...snap(c));
+  } else for (const c of grid(area)) unique.set(...snap(c));
   if (unique.size <= MAX_SAMPLES) return [...unique.values()];
   // Large area: even 7x7 stratified sample over the bounds instead of a row-major stride (which would hit only a few columns).
   const b = area.kind === 'global' ? [-180, -85, 180, 85] : area.bounds!, n = Math.floor(Math.sqrt(MAX_SAMPLES)), cells: Omit<Cell, 'value'>[] = [];

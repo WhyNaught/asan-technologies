@@ -30,3 +30,9 @@ test('every catalogued variable is backed by a real data source', async () => {
   const { phenomena } = await import('./registry.ts');
   for (const p of phenomena) for (const v of p.variables) assert.ok(v.apiId && v.source, `${p.name} / ${v.name}`);
 });
+
+test('a drawn region is covered by a gap-free block of native cells', async () => {
+  const { nativeCells } = await import('./backend.ts');
+  const cells = nativeCells({name: 'Box', kind: 'region', lon: -83, lat: 36, bounds: [-90, 33, -76, 39]});
+  assert.equal(cells.length, new Set(cells.map(c => c.lat)).size * new Set(cells.map(c => c.lon)).size);
+});
