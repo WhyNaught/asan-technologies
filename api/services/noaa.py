@@ -1,4 +1,6 @@
 """Real ocean observations from NOAA: HadISST sea surface temperature (ERDDAP) and the CPC Oceanic Niño Index."""
+from __future__ import annotations
+
 from datetime import date
 from functools import lru_cache
 from math import floor
@@ -20,7 +22,7 @@ def _cell_centre(value: float, limit: float) -> float:
     # HadISST is a 1-degree grid with cell centres at x.5.
     return min(limit, max(-limit, floor(value) + 0.5))
 
-
+# general data fetch is cached
 @lru_cache(maxsize=512)
 def _sst_cached(lat: float, lon: float, start: date, end: date) -> tuple[tuple[date, float], ...]:
     query = (
@@ -42,7 +44,7 @@ def _sst_cached(lat: float, lon: float, start: date, end: date) -> tuple[tuple[d
             result.append((date(int(time_str[:4]), int(time_str[5:7]), 1), float(value)))
     return tuple(result)
 
-
+# general data from NOAA not related to ONI 
 def fetch_sst_series(coordinate: Coordinate, months: list[date]) -> dict[date, float] | None:
     """Monthly SST for the HadISST cell containing the point, or None over land / sea ice / missing data."""
     data = dict(_sst_cached(_cell_centre(coordinate.latitude, 89.5), _cell_centre(coordinate.longitude, 179.5), months[0], months[-1]))
@@ -51,6 +53,8 @@ def fetch_sst_series(coordinate: Coordinate, months: list[date]) -> dict[date, f
     return {month: data[month] for month in months}
 
 
+# cache the table that we fetch from NOAA
+# prevents us from re-fetching the same data
 @lru_cache(maxsize=1)
 def _oni_table() -> dict[tuple[int, int], float]:
     try:
@@ -66,7 +70,7 @@ def _oni_table() -> dict[tuple[int, int], float]:
             table[(year, centre)] = float(parts[3])
     return table
 
-
+# we fetch from NOAA specifically for Oceanic Nino Index 
 def fetch_oni(months: list[date]) -> dict[date, float]:
     table = _oni_table()
     missing = [m for m in months if (m.year, m.month) not in table]

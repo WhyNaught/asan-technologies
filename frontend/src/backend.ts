@@ -1,8 +1,12 @@
-import { grid, inside } from './data';
+import { dates, grid, inside } from './data';
 import type { Cell, Observation, StudyArea, Variable } from './types';
 
 const apiBase = import.meta.env?.VITE_API_BASE_URL || '/api';
 type ApiResponse = { data_mode: string; locations: { coordinate: { latitude: number; longitude: number }; series: { variable: string; source?: string; observations: { timestamp: string; value: number }[] }[] }[] };
+type GiovanniResponse = {observations: {timestamp: string; value: number}[]; source: string};
+type RequestError = Error & { recommendations?: string[] };
+type ErrorBody = { detail?: string | { message?: string; recommendations?: string[] } };
+type DateRange = {startDate: string; endDate: string};
 // shortcut: each sample is one NASA POWER call server-side (fetched in parallel); raise if regions need denser maps.
 const MAX_SAMPLES = 49;
 // NASA POWER (MERRA-2) native grid: 0.5° latitude x 0.625° longitude. Sampling finer than this only repeats values.
@@ -35,6 +39,57 @@ export function nativeCells(area: StudyArea): Omit<Cell, 'value'>[] {
   }
   return [...new Map(cells.map(c => [snap(c)[0], {...snap(c)[1], bounds: c.bounds}] as const)).values()];
 }
+function giovanniBounds(area: StudyArea): [number, number, number, number] {
+  if (area.kind === 'global') return [-180, -85, 180, 85];
+  if (area.kind === 'region') return area.bounds!;
+  const west = Math.max(-180, area.lon - 0.05), east = Math.min(180, area.lon + 0.05);
+  const south = Math.max(-90, area.lat - 0.05), north = Math.min(90, area.lat + 0.05);
+  return [west, south, east, north];
+}
+async function giovanniError(response: Response, fallback: string): Promise<RequestError> {
+  let body: ErrorBody | undefined;
+  try { body = await response.json() as ErrorBody; } catch { /* use the status fallback */ }
+  const detail = body?.detail;
+  const message = typeof detail === 'string' ? detail
+    : detail?.message || fallback;
+  const error = new Error(message) as RequestError;
+  if (typeof detail === 'object' && Array.isArray(detail.recommendations)) {
+    error.recommendations = detail.recommendations.filter((item): item is string => typeof item === 'string');
+  }
+  return error;
+}
+async function fetchGiovanniSeries(variables: Variable[], area: StudyArea, period: DateRange) {
+  const results = await Promise.all(variables.map(async variable => {
+    const response = await fetch(`${apiBase}/data/giovanni/query`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        dataset: variable.apiId,
+        bbox: giovanniBounds(area),
+        start_date: period.startDate,
+        end_date: period.endDate,
+      }),
+      signal: AbortSignal.timeout(150000),
+    });
+    if (!response.ok) {
+      throw await giovanniError(
+        response,
+        `NASA Giovanni returned ${response.status} for ${variable.name}.`,
+      );
+    }
+    const result = await response.json() as GiovanniResponse;
+    const byMonth = new Map(result.observations.map(row => [row.timestamp.slice(0, 7), row.value]));
+    return {
+      id: variable.id,
+      source: result.source || variable.source,
+      rows: dates.map(date => ({date, value: byMonth.get(date.slice(0, 7)) ?? NaN})),
+    };
+  }));
+  return {
+    series: new Map(results.map(result => [result.id, result.rows])),
+    field: new Map<string, Cell[][]>(),
+    sources: new Map(results.map(result => [result.id, result.source])),
+  };
+}
 let catalog: Promise<Set<string>> | undefined;
 async function availableVariables() {
   catalog ??= fetch(`${apiBase}/data/variables`, {signal: AbortSignal.timeout(10000)}).then(async response => {
@@ -45,14 +100,34 @@ async function availableVariables() {
   return catalog;
 }
 
-export async function fetchBackendSeries(variables: Variable[], area: StudyArea, limit = 3): Promise<{ series: Map<string, Observation[]>; field: Map<string, Cell[][]>; sources: Map<string, string> }> {
+export async function fetchBackendSeries(
+  variables: Variable[],
+  area: StudyArea,
+  limit = 3,
+  period: DateRange = {startDate: dates[0], endDate: dates.at(-1)!},
+): Promise<{ series: Map<string, Observation[]>; field: Map<string, Cell[][]>; sources: Map<string, string> }> {
   if (!variables.length || variables.length > limit || variables.some(v => !v.apiId)) throw new Error(`Select up to ${limit} variables supported by the connected API.`);
+  const giovanni = variables.filter(variable => variable.provider === 'giovanni');
+  if (giovanni.length) {
+    const connected = variables.filter(variable => variable.provider !== 'giovanni');
+    const parts = await Promise.all([
+      giovanni.length ? fetchGiovanniSeries(giovanni, area, period) : Promise.resolve(undefined),
+      connected.length ? fetchBackendSeries(connected, area, limit, period) : Promise.resolve(undefined),
+    ]);
+    const series = new Map<string, Observation[]>(), field = new Map<string, Cell[][]>(), sources = new Map<string, string>();
+    for (const part of parts) if (part) {
+      for (const [id, rows] of part.series) series.set(id, rows);
+      for (const [id, cells] of part.field) field.set(id, cells);
+      for (const [id, source] of part.sources) sources.set(id, source);
+    }
+    return {series, field, sources};
+  }
   const available=await availableVariables();
   if(variables.some(v=>!available.has(v.apiId!)))throw new Error('One or more selected variables are not available from the connected API.');
   const cells = nativeCells(area), samples = cells.length <= MAX_SAMPLES ? cells : Array.from({length: MAX_SAMPLES}, (_, i) => cells[Math.round(i * (cells.length - 1) / (MAX_SAMPLES - 1))]);
   const response = await fetch(`${apiBase}/data/query`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({coordinates: samples.map(c => ({latitude: c.lat, longitude: c.lon})), variables: variables.map(v => v.apiId), start_date: '2015-01-01', end_date: '2024-12-01'}),
+    body: JSON.stringify({coordinates: samples.map(c => ({latitude: c.lat, longitude: c.lon})), variables: variables.map(v => v.apiId), start_date: period.startDate, end_date: period.endDate}),
     signal: AbortSignal.timeout(30000),
   });
   if (!response.ok) throw new Error(response.status === 404 ? 'ASAN data API route was not found. Start the API server and check its URL.' : `ASAN data API returned ${response.status}.`);

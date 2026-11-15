@@ -8,6 +8,7 @@ from .models.queries import (
     AppEEARSProductsResponse,
     AppEEARSRequest,
     Coordinate,
+    GiovanniQuery,
     LocationTimeSeries,
     Observation,
     Query,
@@ -28,15 +29,17 @@ from .services.nasa_appeears import (
 from .models.queries import ModisMapRequest, ModisSeriesRequest
 from .services import modis
 from .services.noaa import fetch_oni, fetch_sst_series
+from .services.giovanni import GIOVANNI_DATASETS, query_giovanni_series
 from .models.queries import UrbanVariable
 from .vars import VARIABLES
 
 
 app = FastAPI(
-    title="Urbanization Time-Series API",
+    title="ASAN Earth System Intelligence API",
     description=(
-        "Query monthly NASA POWER or daily and 8-day NASA AppEEARS time series. "
-        "Point-based surface-temperature downloads are also available as ZIP files."
+        "Query monthly NASA POWER, NOAA, and NASA Giovanni area-averaged time series, "
+        "or daily and 8-day NASA AppEEARS time series. Point-based surface-temperature "
+        "downloads are also available as ZIP files."
     ),
     version="0.1.0",
 )
@@ -81,6 +84,21 @@ def request_appeears_data(query: AppEEARSRequest) -> Response:
 @app.post("/data/appeears/query", response_model=AppEEARSQueryResponse)
 def query_appeears_data(query: AppEEARSRequest) -> AppEEARSQueryResponse:
     return query_appeears_product(query)
+
+
+@app.get("/data/giovanni/datasets")
+def list_giovanni_datasets() -> dict[str, list[dict[str, str]]]:
+    return {
+        "datasets": [
+            {"id": dataset.value, **metadata}
+            for dataset, metadata in GIOVANNI_DATASETS.items()
+        ],
+    }
+
+
+@app.post("/data/giovanni/query")
+def query_giovanni_data(query: GiovanniQuery) -> dict:
+    return query_giovanni_series(query)
 
 
 @app.post("/data/modis/map")

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date
 from enum import Enum
 from typing import Literal
@@ -28,6 +30,13 @@ class AppEEARSProduct(str, Enum):
     MOD11A1 = "MOD11A1"
     MYD11A1 = "MYD11A1"
     MOD11A2 = "MOD11A2"
+
+
+class GiovanniDataset(str, Enum):
+    GPM_PRECIPITATION = "GPM_3IMERGM_07_precipitation"
+    AQUA_AEROSOL_OPTICAL_DEPTH = (
+        "MYD08_M3_6_1_Aerosol_Optical_Depth_Land_And_Ocean_Mean_Mean"
+    )
 
 
 class Coordinate(BaseModel):
@@ -71,6 +80,34 @@ class Query(BaseModel):
         if len(coordinate_pairs) != len(self.coordinates):
             raise ValueError("coordinates must not contain duplicates")
 
+        return self
+
+
+class GiovanniQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: GiovanniDataset
+    bbox: tuple[float, float, float, float]
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "GiovanniQuery":
+        west, south, east, north = self.bbox
+        if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+            raise ValueError("bbox must be west,south,east,north within geographic bounds")
+        if self.start_date.day != 1 or self.end_date.day != 1:
+            raise ValueError("start_date and end_date must be the first day of a month")
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must be on or before end_date")
+        month_count = (
+            (self.end_date.year - self.start_date.year) * 12
+            + self.end_date.month
+            - self.start_date.month
+            + 1
+        )
+        if month_count > 120:
+            raise ValueError("The requested period cannot exceed 120 months")
         return self
 
 

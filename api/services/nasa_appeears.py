@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import csv
 import os
 import re
@@ -113,8 +115,8 @@ def _request_json(
 
 # helper method to login to NASA APPEEARS
 def _login() -> str:
-    username = os.getenv("APPEEARS_USERNAME")
-    password = os.getenv("APPEEARS_PASSWORD")
+    username = os.getenv("EARTHDATA_USERNAME")
+    password = os.getenv("EARTH_DATA_PASSWORD")
     if not username or not password:
         raise HTTPException(
             status_code=503,
