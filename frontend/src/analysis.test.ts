@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, correlate, monthlyAnomalies } from './analysis.ts';
+import { analyze, correlate, mannKendall, monthlyAnomalies } from './analysis.ts';
 
 const observations = (slope: number) => Array.from({ length: 120 }, (_, i) => ({
   date: new Date(Date.UTC(2015, i, 1)).toISOString().slice(0, 10),
@@ -38,4 +38,10 @@ test('reject insufficient dates and invalid significance thresholds', () => {
   assert.throws(() => analyze(observations(1).slice(0, 2)));
   assert.throws(() => analyze(observations(1), 0));
   assert.throws(() => analyze([{date: '2020-01-01', value: 1}, {date: '2020-01-01', value: 2}, {date: '2020-01-01', value: 3}]));
+});
+
+test('Mann-Kendall detects a monotonic trend and ignores a flat series', () => {
+  const up = mannKendall(Array.from({length: 40}, (_, i) => i + (i % 3)));
+  assert.ok(up.p < 0.001 && up.sen > 0.9);
+  assert.equal(mannKendall(Array(20).fill(5)).p, 1);
 });

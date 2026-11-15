@@ -1,9 +1,11 @@
 import type { Phenomenon, Variable } from './types';
 const v = (id: string, name: string, unit: string, layer: Variable['layer'], domain: [number, number], global = true, apiId?: string): Variable => ({ id, name, unit, layer, domain, global, apiId });
 export const variables = {
-  temperature: v('temperature', 'Land surface temperature', '°C', 'heat', [10, 45], false, 'land_surface_temperature'),
+  temperature: v('temperature', 'Earth skin temperature', '°C', 'heat', [10, 45], false, 'earth_skin_temperature'),
   air: v('air', 'Air temperature', '°C', 'scalar', [5, 40], false, 'air_temperature'),
   nightLight: v('night-light', 'Night light radiance', 'nW/cm²/sr', 'scalar', [0, 80], false, 'night_light_radiance'),
+  humidity: v('humidity', 'Relative humidity (2 m)', '%', 'scalar', [0, 100], false, 'relative_humidity'),
+  dewPoint: v('dew-point', 'Dew point temperature (2 m)', '°C', 'scalar', [-10, 30], false, 'dew_point_temperature'),
   vegetation: v('vegetation', 'Vegetation cover', 'NDVI', 'scalar', [0, 1]),
   vegetationAnomaly: v('vegetation-anomaly', 'Vegetation anomaly', 'NDVI anomaly', 'anomaly', [-0.3, 0.3]),
   albedo: v('albedo', 'Surface reflectance', 'fraction', 'scalar', [0, 0.5], false),
@@ -16,8 +18,8 @@ export const variables = {
 };
 const groups: [string, [string, string, Variable[]][]][] = [
   ['Atmosphere', [
-    ['Urban heat islands', 'Investigate how built environments retain heat.', [variables.temperature, variables.air, variables.nightLight, variables.vegetation, variables.albedo, variables.built]],
-    ['Heatwaves and humid heat', 'Explore prolonged heat and humidity.', [variables.air]],
+    ['Urban heat islands', 'Investigate how built environments retain heat.', [variables.temperature, variables.air, variables.nightLight, variables.humidity, variables.dewPoint, variables.vegetation, variables.albedo, variables.built]],
+    ['Heatwaves and humid heat', 'Explore prolonged heat and humidity.', [variables.air, variables.humidity, variables.dewPoint]],
     ['Wildfire smoke transport', 'Trace smoke particles through the atmosphere.', [v('pm25', 'Fine particulate matter', 'µg/m³', 'raster', [0, 100])]],
     ['Urban air pollution', 'Investigate air quality in growing cities.', [v('no2', 'Nitrogen dioxide', 'mol/m²', 'raster', [0, 0.001])]],
     ['Dust storms', 'Explore dust in the atmosphere.', [v('aod', 'Aerosol optical depth', 'AOD', 'raster', [0, 2])]],
