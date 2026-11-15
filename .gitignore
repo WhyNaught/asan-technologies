@@ -4,4 +4,6 @@
 **/dist
 **/.env.local
 **/public/cesium
-__pycache__/
+**/__pycache__
+**/.vscode
+**/scratch.txt
