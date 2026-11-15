@@ -1,7 +1,7 @@
 import './styles.css';
 import { phenomena, categories, variables as allVariables } from './registry';
 import { places, dates } from './data';
-import { analyze, correlate, monthlyAnomalies } from './analysis';
+import { analyze, correlate, forecastAutoregression, forecastLinearTrend, monthlyAnomalies, seasonalCycle } from './analysis';
 import { renderChart, number, signed, dateLabel } from './chart';
 import { EarthMap } from './map';
 import { ionToken } from './providers';
@@ -22,6 +22,8 @@ const timeline: TimelineState = {start: 0, end: 119, index: 119, playing: false,
 let phenomenon: Phenomenon | undefined, variable: Variable | undefined, area: StudyArea | undefined;
 let selectedVariables: string[] = [];
 let variablesOpen = false;
+let variablePickerMode: 'guided' | 'manual' = 'manual', variableTopic: string | null = null, variableSource: string | null = null;
+let customSelected: string[] = [], forecastMonth = '2030-12';
 let ready = false, analysisOpen = false, expanded = false, anomalies = true, alpha = 0.05, opacity = 0.65;
 const hiddenLayers = new Set<string>();
 let trendMap = false, trendCache: {field: unknown; key: string; cells: import('./types').Cell[]} | undefined;
@@ -52,13 +54,14 @@ $('#app').innerHTML = `
       ${button('style', 'layers', 'Switch satellite / map')}${button('draw', 'area', 'Select study area')}
     </div>
     <div id="draw-instructions" class="draw-instructions surface" hidden></div>
-    <div id="welcome" class="welcome"><strong>Explore a changing Earth</strong><span>Choose a phenomenon or search for a place to begin.</span><button class="primary" data-action="tour">Take the 2-minute guided tour</button></div>
+    <div id="welcome" class="welcome"><strong>Explore a changing Earth</strong><span>Choose a phenomenon, build a dataset, or search for a place to begin.</span><div class="welcome-actions"><button class="primary" data-action="guided-variables">Guide me to variables</button><button class="secondary" data-action="manual-variables">Select data variables myself</button><button class="tour-link" data-action="tour">Take the guided tour</button></div></div>
     <aside id="tour" class="tour surface" role="dialog" aria-label="Guided tour" aria-live="polite" hidden></aside>
     <div id="legend" class="legend surface" hidden></div><div id="timeline" class="timeline surface" hidden></div>
     <div class="map-footer"><button id="provider-status" class="provider-status" data-action="settings">Loading Earth…</button><span id="coordinate-readout"></span><span class="scale"><span id="scale-readout"></span><i></i></span></div>
     <section id="analysis" class="analysis-sheet" aria-label="Trend analysis workspace" hidden></section>
     <div id="toast" class="toast surface" role="status" hidden></div>
     <dialog id="palette" class="command-palette" aria-label="Search places and phenomena"></dialog>
+    <dialog id="variable-selection" class="settings-dialog variable-selection-dialog" aria-labelledby="variable-selection-title"></dialog>
     <dialog id="trends" class="settings-dialog trends-dialog" aria-labelledby="trends-title"></dialog>
     <dialog id="settings" class="settings-dialog" aria-labelledby="settings-title"></dialog>
   </main>`;
@@ -72,11 +75,20 @@ map.initialize().then(() => {ready = true; $('#earth canvas')?.setAttribute('tab
   $('#welcome').innerHTML = `<h1>Earth couldn’t load.</h1><p>${escape(error.message || 'Check your network and WebGL support.')}</p><button class="primary" data-action="settings">Map setup</button>`;
 });
 function toast(message: string) {const el = $('#toast'); el.textContent = message; el.hidden = false; window.setTimeout(() => {el.hidden = true;}, 5500);}
-function selectedRows(v = variable!, a = area!, start = timeline.start, end = timeline.end) {
-  const key = JSON.stringify([v.id, a]); let rows = seriesCache.get(key);
-  if (!rows) rows = dates.map(date => ({date, value: NaN})); // not loaded yet: shown as gaps, never invented
-  if (anomalies) rows = monthlyAnomalies(rows, 2015, 2024);
+function rawRows(v = variable!, a = area!, start = timeline.start, end = timeline.end) {
+  const key = JSON.stringify([v.id, a]), rows = seriesCache.get(key) || dates.map(date => ({date, value: NaN}));
   return rows.slice(start, end + 1);
+}
+function selectedRows(v = variable!, a = area!, start = timeline.start, end = timeline.end) {
+  let rows = rawRows(v, a, start, end);
+  if (anomalies) rows = monthlyAnomalies(rows, 2015, 2024);
+  return rows;
+}
+function monthlyBaseline(v:Variable,date:string) {
+  if(!anomalies||!area)return 0;
+  const month=Number(date.slice(5,7))-1,rows=seriesCache.get(JSON.stringify([v.id,area]))||[];
+  const values=rows.filter(row=>Number.isFinite(row.value)&&new Date(row.date).getUTCFullYear()>=2015&&new Date(row.date).getUTCMonth()===month).map(row=>row.value);
+  return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:0;
 }
 let dataPromise: Promise<void> = Promise.resolve();
 function refreshBackendData() { return dataPromise = loadBackendData(); }
@@ -90,7 +102,7 @@ async function loadBackendData() {
   dataLoading=true;renderControls();updateLayer();renderAnalysis();
   try{
     const period={startDate:dates[timeline.start],endDate:dates[timeline.end]};
-    const result=await fetchBackendSeries(regular,area,3,period);
+    const result=await fetchBackendSeries(regular,area,16,period);
     if(current!==requestId)return;
     for(const [id,rows] of result.series)seriesCache.set(JSON.stringify([id,area]),rows);
     backendFields=result.field;for(const [id,name] of result.sources)backendSources.set(id,name);dataLoading=false;dataError='';dataErrorRecommendations=[];
@@ -153,7 +165,7 @@ function renderControls() {
       <span class="sample-type">${area ? areaLabel(area) : 'Pick how to define the place you want to investigate'}</span>
       <div class="area-tools" role="group" aria-label="Choose a study area"><button data-action="search">${icon('pin')}<span>Search a place</span></button><button data-action="draw" ${drawMode==='rectangle'?'aria-pressed="true"':''}>${icon('area')}<span>Draw a box</span></button><button data-action="polygon" ${drawMode==='polygon'?'aria-pressed="true"':''}>${icon('shape')}<span>Draw a shape</span></button>${variable!.global ? `<button data-action="global">${icon('globe')}<span>Worldwide</span></button>` : ''}</div>
       ${area?'':`<div class="suggested-areas"><span>Quick picks</span>${places.slice(0,4).map(p=>`<button data-place="${escape(p.name)}">${escape(p.name.split(',')[0])}</button>`).join('')}</div>`}
-      <details class="variable-picker"><summary>Variables <span>${selectedVariables.length} selected</span></summary><div class="variable-options">${phenomenon.variables.map(v=>{const unavailable=false,limit=selectedVariables.length>=3&&!selectedVariables.includes(v.id);return `<label class="${unavailable?'unavailable-variable':''}"><input type="checkbox" name="variables" value="${v.id}" ${selectedVariables.includes(v.id)?'checked':''} ${unavailable||limit?'disabled':''}>${v.name}<span>${escape(v.source)}</span></label>`}).join('')}</div></details>
+      <div class="variable-selection-links"><button class="text-button" data-action="guided-variables">Guide me to variables</button><button class="text-button" data-action="manual-variables">Select data variables myself</button></div><details class="variable-picker"><summary>Variables <span>${selectedVariables.length} selected</span></summary><div class="variable-options">${phenomenon.variables.map(v=>{const unavailable=false,limit=selectedVariables.length>=16&&!selectedVariables.includes(v.id);return `<label class="${unavailable?'unavailable-variable':''}"><input type="checkbox" name="variables" value="${v.id}" ${selectedVariables.includes(v.id)?'checked':''} ${unavailable||limit?'disabled':''}>${v.name}<span>${escape(v.source)}</span></label>`}).join('')}</div></details>
       <div class="step-heading period-heading"><span>Study period</span><button data-action="period">${dates[timeline.start].slice(0,7)} – ${dates[timeline.end].slice(0,7)} ${icon('chevron')}</button></div>
       ${dataLoading?'<p class="data-status" role="status">Requesting monthly series from ASAN API…</p>':dataError?`<div class="data-status error" role="alert"><p>${escape(dataError)}</p>${dataErrorRecommendations.length?`<strong>What to try next</strong><ul>${dataErrorRecommendations.map(item=>`<li>${escape(item)}</li>`).join('')}</ul>`:''}<button data-action="retry-data">Retry</button></div>`:''}
       <button class="scan-action" data-action="scan" ${!area?'disabled':''}>${icon('search')}<span>Find trends in this area</span></button>
@@ -236,16 +248,32 @@ function renderAnalysis() {
   if(isModis(variable)&&(modisPending||modisError)){host.innerHTML=`<div class="analysis-header"><div><h2>${escape(variable.name)}</h2><p id="modis-status" role="status">${modisError?escape(modisError):'MODIS 1 km series: '+escape(modisPending)}</p></div><div class="sheet-actions">${button('close-analysis','close','Close analysis')}</div></div><div class="analysis-scroll"><div class="analysis-variable-tabs" aria-label="Map layer"><span>Variable · map layer</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div>${modisError?'':'<p class="definition">NASA limits MODIS requests, so the first time you analyse an area the 10-year series takes a couple of minutes to assemble; after that it is cached. The map layer appears as soon as the first month arrives. You can switch to the other variables meanwhile.</p>'}</div>`;return;}
   const rows=selectedRows();let result:ReturnType<typeof analyze>;
   try{result=analyze(rows,alpha);}catch(e){host.innerHTML=`<div class="analysis-header"><h2>Not enough observations</h2>${button('close-analysis','close','Close analysis')}</div><p>${escape((e as Error).message)}</p>`;return;}
-  const other=comparisonData(),otherStats=other&&analyze(other.rows,alpha);
+  const other=comparisonData(),otherStats=other&&analyze(other.rows,alpha),chosen=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!).filter(Boolean),responseVariable=chosen[0]||variable;
+  const seasonal=seasonalCycle(rawRows(responseVariable)),futureDate=`${forecastMonth}-01`,forecastMinDate=new Date(dates[timeline.end]);
+  forecastMinDate.setUTCMonth(forecastMinDate.getUTCMonth()+1);
+  const forecastMin=forecastMinDate.toISOString().slice(0,7);
+  let prediction:{value:number;lower:number;upper:number;standardDeviation:number;slope:number;p:number;n:number}|undefined,forecastError='';
+  try{
+    prediction=chosen.length>1
+      ? forecastAutoregression(selectedRows(responseVariable),chosen.slice(1).map(item=>selectedRows(item)),futureDate,alpha)
+      : forecastLinearTrend(selectedRows(responseVariable),futureDate,alpha);
+    const baseline=monthlyBaseline(responseVariable,forecastMonth);
+    prediction={...prediction,value:prediction.value+baseline,lower:prediction.lower+baseline,upper:prediction.upper+baseline};
+  }catch(error){forecastError=(error as Error).message;}
+  const trendSlope=prediction?.slope??result.slope,trendP=prediction?.p??result.p;
+  const trendDirection=trendP<alpha?(trendSlope>0?'Increasing':'Decreasing'):'No significant direction';
+  const seasonalSummary=seasonal.p<alpha?'Seasonal cycle detected':'No clear seasonal cycle';
+  const trendPLabel=chosen.length>1?(prediction?'Adjusted autoregression time-trend p':'Single-series trend p; autoregression unavailable'): 'Trend p';
   const decade=`${signed(result.slope)} ${escape(variable.unit)} per decade (95% CI ${signed(result.ci[0])} to ${signed(result.ci[1])})`,mkSig=result.mk.p<alpha;
   const summary=result.significant&&mkSig?`<strong>Clear trend:</strong> ${escape(variable.name)} ${result.slope>0?'rose':'fell'} by about ${decade}. Both tests agree this is unlikely to be chance.`:result.significant!==mkSig?`<strong>Mixed evidence:</strong> the t-test and Mann-Kendall test disagree (${decade}), so treat this trend with caution.`:`<strong>No statistically clear trend</strong> (${decade}). A longer record, or a different region, might reveal one.`;
   host.innerHTML=`<div class="sheet-handle"></div><div class="analysis-header"><div><h2>${variable.name}${anomalies?' · seasonal anomalies':''}</h2><p>${escape(area.name)} · ${areaLabel(area)} · ${escape(backendSources.get(variable.id)||'loading')}</p></div><div class="sheet-actions">${button('expand-analysis','expand',expanded?'Reduce analysis workspace':'Expand analysis workspace')}${button('close-analysis','close','Close analysis')}</div></div>
   <div class="analysis-scroll"><div class="analysis-options">${periodControls()}<label class="anomaly-control"><input type="checkbox" id="anomalies" ${anomalies?'checked':''}> Seasonal anomalies</label><button class="text-button" data-action="compare">${icon('compare')}${compare?'Comparing series':'Add comparison'}</button></div>
   ${compare?`<div class="comparison-controls"><label>Compare with <select id="compare-mode">${['period','variable'].filter(m=>m!=='variable'||selectedVariables.length>1).map(m=>`<option value="${m}" ${compareMode===m?'selected':''}>${m==='region'?'Two regions':m==='period'?'Two periods':'Related variables'}</option>`).join('')}</select></label>${compareMode==='region'?`<label>With <select id="compare-place">${places.map((p,i)=>`<option value="${i}" ${i===comparePlace?'selected':''}>${p.name}</option>`).join('')}</select></label>`:compareMode==='period'?periodControls(compareStart,compareEnd,'compare'):`<label>With <select id="compare-variable">${phenomenon!.variables.filter(v=>selectedVariables.includes(v.id)&&v.id!==variable!.id).map(v=>`<option value="${v.id}" ${v.id===other?.variable.id?'selected':''}>${v.name}</option>`).join('')}</select></label>`}${button('remove-compare','close','Remove comparison')}</div>`:''}
-  <div class="analysis-variable-tabs" aria-label="${isGiovanni(variable)?'Area-averaged series':'Map layer'}"><span>${isGiovanni(variable)?'Area-averaged series':'Variable · map layer'}</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div>${isGiovanni(variable)?'<p class="definition">NASA Giovanni averages the data over the selected bounding box. The map is shown for geographic context only; these results are not per-pixel measurements. Aerosol optical depth is a column proxy, not a surface PM2.5 measurement. Giovanni does not provide soil pH, mineral composition, rainwater pH, or acid deposition in this integration.</p>':''}<p class="interpretation">${summary} </p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}${caution[variable.id]?`<p class="definition caution"><b>Caution.</b> ${escape(caution[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
+  <div class="analysis-variable-tabs" aria-label="${isGiovanni(variable)?'Area-averaged series':'Map layer'}"><span>${isGiovanni(variable)?'Area-averaged series':'Map layer · first selected variable is Y for autoregression'}</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div>${isGiovanni(variable)?'<p class="definition">NASA Giovanni averages the data over the selected bounding box. The map is shown for geographic context only; these results are not per-pixel measurements. Aerosol optical depth is a column proxy, not a surface PM2.5 measurement. Giovanni does not provide soil pH, mineral composition, rainwater pH, or acid deposition in this integration.</p>':''}<p class="interpretation">${summary}</p><p class="trend-classification"><strong>Trend classification${anomalies?' · seasonal anomalies':' · seasonal cycle retained'}:</strong> ${trendDirection} · ${seasonalSummary}. ${trendPLabel} ${trendP<.001?'&lt; 0.001':'= '+number(trendP,3)} (${trendP<alpha?'significant':'not significant'} at α = ${alpha}). Seasonal-cycle ANOVA p ${seasonal.p<.001?'&lt; 0.001':'= '+number(seasonal.p,3)}.${chosen.length>1?` Y is ${escape(responseVariable.name)}; the other selected variables are lagged predictors.`:''}</p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}${caution[variable.id]?`<p class="definition caution"><b>Caution.</b> ${escape(caution[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
   <div class="metrics"><div><span>${variable.name} · Trend</span><strong>${signed(result.slope)} <small>${variable.unit} / decade</small></strong></div><div><span>Statistical significance</span><strong>p ${result.p<.001?'&lt; 0.001':'= '+number(result.p,3)}</strong><small>${result.significant?'Significant':'Not significant'} at α = ${alpha} · t-test</small></div><div><span>Mann-Kendall (non-parametric)</span><strong>p ${result.mk.p<.001?'&lt; 0.001':'= '+number(result.mk.p,3)}</strong><small>τ = ${number(result.mk.tau,2)} · Sen slope ${signed(result.mk.sen*120)} ${variable.unit}/decade · ${result.mk.p<alpha?'Significant':'Not significant'}</small></div><div><span>95% confidence interval</span><strong>${signed(result.ci[0])} to ${signed(result.ci[1])}</strong><small>${variable.unit} / decade</small></div><div><span>Coverage</span><strong>${rows[0].date.slice(0,4)}–${rows.at(-1)!.date.slice(0,4)}</strong><small>${result.n} monthly observations · ${result.missing} missing</small></div></div>
+  <section class="forecast-panel" aria-label="Trend forecast"><div class="forecast-heading"><h3>${chosen.length>1?'Multiple autoregression':'Trend projection'}</h3><label>Estimate for <input id="forecast-month" type="month" min="${forecastMin}" max="2054-12" value="${forecastMonth}"></label></div>${prediction?`<p><strong>${escape(responseVariable.name)} · ${forecastMonth}</strong> · ${signed(prediction.value)} ${escape(responseVariable.unit)} · forecast SD ${number(prediction.standardDeviation)} ${escape(responseVariable.unit)}</p><p>95% prediction interval: <strong>${signed(prediction.lower)} to ${signed(prediction.upper)} ${escape(responseVariable.unit)}</strong>. ${chosen.length>1?'Model: current Y from previous-month Y, previous-month predictor values, and elapsed time. Future predictors are held at their latest observed values.':'Extrapolation of the seasonal-adjusted linear trend.'}</p>`:`<p class="form-error" role="status">${escape(forecastError)}</p>`}<small>Exploratory estimate, not a causal or operational forecast. Monthly autocorrelation and provider uncertainty may make this interval too narrow.</small></section>
   ${other&&otherStats?`<p class="comparison-summary"><strong>${escape(other.name)}</strong>: ${signed(otherStats.slope)} ${other.variable.unit}/decade. The trends ${Math.sign(result.slope)===Math.sign(otherStats.slope)?'have the same direction':'have opposite directions'}. Different displayed slopes do not establish a statistically significant difference.${compareMode==='period'?' Periods align by elapsed month.':''}${other.variable.unit!==variable.unit?' The chart uses standardized values for comparable axes; slopes retain original units.':''}</p>`:''}
-  <details class="analysis-more"><summary>Correlations & downloads</summary><div id="correlations"></div><div class="report-actions"><button class="text-button" data-action="report">Download scientific report</button><button class="text-button" data-action="csv">Download observations (CSV)</button></div></details><details class="methodology"><summary>How was this calculated?</summary><div class="method-content"><p>Ordinary least squares regresses values against actual elapsed years (365.25 days). Slope × 10 gives units per decade. A two-sided Student-t test of zero slope uses n − 2 degrees of freedom. The 95% confidence interval is slope ± t<sub>0.975</sub> × standard error. Missing values are excluded, never replaced with zero.</p><p>${anomalies?'Seasonal anomalies subtract each calendar month’s 2015–2024 mean, calculated over the complete baseline before filtering the study period.':'Seasonality is retained. Enable seasonal anomalies to subtract each calendar month’s 2015–2024 baseline mean.'} The climatology is estimated from the same demonstration series and may influence trend estimates.</p><p>Study period: ${dateLabel(rows[0].date)}–${dateLabel(rows.at(-1)!.date)}. ${area.kind==='point'?'This is a point/grid-cell sample, not a regional average.':'NASA/NOAA native-grid cells (up to 49, evenly sampled for large areas) inside the study region are weighted by cosine of latitude; polygon edges use center inclusion.'} Global coverage excludes polar caps beyond 85°.</p><p>The test assumes independent, normally distributed errors with constant variance. Temporal autocorrelation and seasonality may understate uncertainty. A trend does not establish causation.</p><label>Significance threshold <select id="alpha">${[.01,.05,.1].map(a=>`<option value="${a}" ${alpha===a?'selected':''}>${a}</option>`).join('')}</select></label><p>${escape(phenomenon.why)}</p></div></details></div>`;
+  <details class="analysis-more"><summary>Correlations & downloads</summary><div id="correlations"></div><div class="report-actions"><button class="text-button" data-action="report">Download scientific report</button><button class="text-button" data-action="csv">Download observations (CSV)</button></div></details><details class="methodology"><summary>How was this calculated?</summary><div class="method-content"><p>Ordinary least squares regresses values against actual elapsed years (365.25 days). Slope × 10 gives units per decade. A two-sided Student-t test of zero slope uses n − 2 degrees of freedom. The 95% confidence interval is slope ± t<sub>0.975</sub> × standard error. Missing values are excluded, never replaced with zero.</p><p>${anomalies?'Seasonal anomalies subtract each calendar month’s 2015–2024 mean, calculated over the complete baseline before filtering the study period.':'Seasonality is retained. Enable seasonal anomalies to subtract each calendar month’s 2015–2024 baseline mean.'} The climatology is estimated from the same demonstration series and may influence trend estimates.</p><p>Seasonality is tested by one-way ANOVA across calendar-month means. With multiple selected variables, the ARX model regresses current Y on prior-month Y, prior-month selected predictors, and elapsed time. The time coefficient receives a two-sided t-test; forecasts hold future predictors at their latest observed values and propagate residual and coefficient uncertainty into a 95% prediction interval. This short monthly record and residual autocorrelation make p-values and intervals indicative, not definitive.</p><p>Study period: ${dateLabel(rows[0].date)}–${dateLabel(rows.at(-1)!.date)}. ${area.kind==='point'?'This is a point/grid-cell sample, not a regional average.':'NASA/NOAA native-grid cells (up to 49, evenly sampled for large areas) inside the study region are weighted by cosine of latitude; polygon edges use center inclusion.'} Global coverage excludes polar caps beyond 85°.</p><p>The test assumes independent, normally distributed errors with constant variance. Temporal autocorrelation and seasonality may understate uncertainty. A trend does not establish causation.</p><label>Significance threshold <select id="alpha">${[.01,.05,.1].map(a=>`<option value="${a}" ${alpha===a?'selected':''}>${a}</option>`).join('')}</select></label><p>${escape(phenomenon.why)}</p></div></details></div>`;
   drawChart();
 }
 function drawChart() {
@@ -309,6 +337,58 @@ function openAnalysis() {
   analysisOpen=true;$('#welcome').hidden=true;renderAnalysis();$('#analysis h2').setAttribute('tabindex','-1');$('#analysis h2').focus({preventScroll:true});
 }
 function closeAnalysis(){analysisOpen=false;renderAnalysis();if(ready)map.focus();}
+function openVariablePicker(mode:'guided'|'manual') {
+  variablePickerMode=mode;variableTopic=mode==='guided'?null:'';variableSource=mode==='guided'?null:'';
+  customSelected=[...selectedVariables];
+  renderVariablePicker();
+  $<HTMLDialogElement>('#variable-selection').showModal();
+}
+function renderVariablePicker() {
+  const dialog=$<HTMLDialogElement>('#variable-selection'),catalogue=Object.values(allVariables);
+  const topics=[...new Set(catalogue.map(item=>item.topic))];
+  const scoped=variableTopic?catalogue.filter(item=>item.topic===variableTopic):catalogue;
+  const sources=[...new Set(scoped.map(item=>item.source))];
+  const results=catalogue.filter(item=>(!variableTopic||item.topic===variableTopic)&&(!variableSource||item.source===variableSource));
+  const topicQuestion=variablePickerMode==='guided'&&variableTopic===null
+    ? `<section class="picker-question"><h3>1 · What are you interested in?</h3><div class="picker-choices">${topics.map(topic=>`<button data-picker-topic="${escape(topic)}">${escape(topic)}</button>`).join('')}<button data-picker-topic="">I’m not sure</button></div></section>`
+    : '';
+  const sourceQuestion=variablePickerMode==='guided'&&variableTopic!==null&&!variableSource
+    ? `<section class="picker-question"><h3>2 · Which data source would you like to use?</h3><div class="picker-choices">${sources.map(source=>`<button data-picker-source="${escape(source)}">${escape(source)}</button>`).join('')}<button data-picker-source="">Any source</button></div></section>`
+    : '';
+  const manualFilters=variablePickerMode==='manual'
+    ? `<div class="picker-filters"><label>Topic <select id="picker-topic"><option value="">All topics</option>${topics.map(topic=>`<option value="${escape(topic)}" ${variableTopic===topic?'selected':''}>${escape(topic)}</option>`).join('')}</select></label><label>Data source <select id="picker-source"><option value="">All sources</option>${sources.map(source=>`<option value="${escape(source)}" ${variableSource===source?'selected':''}>${escape(source)}</option>`).join('')}</select></label></div>`
+    : '';
+  const canList=variablePickerMode==='manual'||(variableTopic!==null&&variableSource!==null);
+  dialog.innerHTML=`<div class="dialog-heading"><div><h2 id="variable-selection-title">${variablePickerMode==='guided'?'Find variables for your question':'Choose data variables'}</h2><p>All available series are monthly. The first selected variable is the response (Y).</p></div>${button('close-variable-selection','close','Close variable selection')}</div><div class="settings-content">
+    ${topicQuestion}${sourceQuestion}${manualFilters}
+    ${canList?`<section class="picker-question"><h3>${variablePickerMode==='guided'?'3 · Choose variables':'Variables'}</h3><div class="picker-variable-list">${results.map(item=>`<label><input type="checkbox" name="picker-variable" value="${item.id}" ${customSelected.includes(item.id)?'checked':''}><span><strong>${escape(item.name)}</strong><small>${escape(item.topic)} · ${escape(item.source)} · ${escape(item.cadence)}</small></span></label>`).join('')||'<p class="empty-results">No variables match those filters.</p>'}</div></section>`:''}
+    <div id="picker-selection-summary" class="picker-selection-summary"></div><div class="picker-actions"><button class="primary" data-action="apply-variable-selection" ${customSelected.length?'':'disabled'}>Use selected variables</button></div>
+    <p class="picker-note">NOAA choices include HadISST sea-surface temperature (ocean cells) and the NOAA CPC Oceanic Niño Index. Other providers use the same variable catalogue and analysis interface.</p></div>`;
+  updatePickerSelection();
+}
+function updatePickerSelection() {
+  const summary=$('#picker-selection-summary');
+  if(summary)summary.innerHTML=customSelected.length
+    ? `Selected (${customSelected.length}/16): ${customSelected.map((id,index)=>{const item=Object.values(allVariables).find(v=>v.id===id)!;return index===0?`<strong>Y · ${escape(item.name)}</strong>`:`<button class="picker-target" data-picker-target="${id}">Set ${escape(item.name)} as Y</button>`}).join(' ')}`
+    : 'Select at least one variable. Choose more than one to fit a multiple autoregression.';
+  const apply=$<HTMLButtonElement>('#variable-selection [data-action=apply-variable-selection]');
+  if(apply)apply.disabled=!customSelected.length;
+}
+function applyVariableSelection() {
+  const chosen=customSelected.map(id=>Object.values(allVariables).find(item=>item.id===id)).filter((item):item is Variable=>!!item);
+  if(!chosen.length){toast('Select at least one data variable.');return;}
+  phenomenon={
+    id:'custom-data-selection',name:'Custom data study',category:'Custom selection',
+    description:'A custom selection of monthly observations from the connected data sources.',
+    why:'These variables come from connected data providers. Associations and forecasts do not establish causation.',
+    variables:chosen,defaultVariable:chosen[0].id,scope:'Point, selected region, or worldwide',
+    temporalResolution:'monthly',visualization:chosen[0].layer,demo:true,featured:false,
+  };
+  variable=chosen[0];selectedVariables=chosen.map(item=>item.id);variablesOpen=false;
+  compare=false;compareVariable='';hiddenLayers.clear();analysisOpen=false;dataError='';
+  $('#welcome').hidden=true;$<HTMLDialogElement>('#variable-selection').close();
+  renderControls();updateLayer();renderAnalysis();void refreshBackendData();
+}
 function openPalette(mode:'all'|'phenomena') {
   paletteMode=mode;query='';category='';remote=[];catalogueOpen=false;const dialog=$<HTMLDialogElement>('#palette');
   dialog.innerHTML=`<div class="palette-head">${icon('search')}<input id="palette-search" aria-label="Search places and phenomena" placeholder="${mode==='all'?'Search a place or phenomenon…':'Find a phenomenon…'}" autocomplete="off">${button('close-palette','close','Close search')}</div><div id="palette-body"></div>`;
@@ -364,13 +444,16 @@ function startDraw(mode:'rectangle'|'polygon') {
 document.addEventListener('click',async event=>{
   const target=(event.target as Element).closest<HTMLElement>('button,[data-action]');if(!target)return;
   if(target.dataset.scanVariable){openScanResult(target.dataset.scanVariable);return;}
+  if(target.dataset.pickerTopic!==undefined){variableTopic=target.dataset.pickerTopic;variableSource=null;renderVariablePicker();return;}
+  if(target.dataset.pickerSource!==undefined){variableSource=target.dataset.pickerSource;renderVariablePicker();return;}
+  if(target.dataset.pickerTarget){customSelected=[target.dataset.pickerTarget,...customSelected.filter(id=>id!==target.dataset.pickerTarget)];updatePickerSelection();return;}
   if(target.dataset.phenomenon){selectPhenomenon(target.dataset.phenomenon);$<HTMLDialogElement>('#palette').close();return;}
   if(target.dataset.activeVariable){variable=phenomenon!.variables.find(v=>v.id===target.dataset.activeVariable)!;updateLayer();renderAnalysis();return;}
   if(target.dataset.category!==undefined){category=target.dataset.category;catalogueOpen=!!category;renderPaletteResults();return;}
   if(target.dataset.place){const next=[...places,...remote].find(p=>p.name===target.dataset.place)!;selectArea(next);if(ready)map.flyTo(next);$<HTMLDialogElement>('#palette').close();return;}
   if(target.dataset.demo!==undefined){const idx=Number(target.dataset.demo),names=['Urban heat islands','Persistent drought','El Niño / La Niña'];selectPhenomenon(phenomena.find(p=>p.name===names[idx])!.id);selectArea(places[[0,2,3][idx]]);if(ready)map.flyTo(area!);return;}
   try{switch(target.dataset.action){
-    case 'scan':void runScan();break;case 'close-trends':$<HTMLDialogElement>('#trends').close();break;case 'tour':runTour();break;case 'search':openPalette('all');break;case 'phenomena':openPalette('phenomena');break;case 'close-palette':$<HTMLDialogElement>('#palette').close();break;case 'geocode':await geocode();break;case 'browse-catalogue':catalogueOpen=true;renderPaletteResults();break;
+    case 'scan':void runScan();break;case 'close-trends':$<HTMLDialogElement>('#trends').close();break;case 'tour':runTour();break;case 'guided-variables':openVariablePicker('guided');break;case 'manual-variables':openVariablePicker('manual');break;case 'apply-variable-selection':applyVariableSelection();break;case 'close-variable-selection':$<HTMLDialogElement>('#variable-selection').close();break;case 'search':openPalette('all');break;case 'phenomena':openPalette('phenomena');break;case 'close-palette':$<HTMLDialogElement>('#palette').close();break;case 'geocode':await geocode();break;case 'browse-catalogue':catalogueOpen=true;renderPaletteResults();break;
     case 'settings':settings();break;case 'period':settings(true);break;case 'close-settings':$<HTMLDialogElement>('#settings').close();break;case 'retry-data':void refreshBackendData();break;case 'edit-study':$('.explorer').classList.toggle('editing-study');break;
     case 'zoom-in':if(ready)map.zoom(1);break;case 'zoom-out':if(ready)map.zoom(-1);break;case 'reset':if(ready)map.reset();break;case 'tilt':if(ready)map.tilt();break;
     case 'style':if(ready)await map.toggleStyle();break;case 'satellite':if(ready)await map.setStyle('satellite');break;case 'clean-map':if(ready)await map.setStyle('map');break;
@@ -390,9 +473,19 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const el=event.target as HTMLInputElement;
+  if(el.name==='picker-variable'){
+    if(el.checked){if(!customSelected.includes(el.value)&&customSelected.length<16)customSelected.push(el.value);else if(customSelected.length>=16){el.checked=false;toast('Choose no more than 16 variables.');}}
+    else customSelected=customSelected.filter(id=>id!==el.value);
+    updatePickerSelection();return;
+  }
+  if(el.id==='picker-topic'){variableTopic=el.value;variableSource='';renderVariablePicker();return;}
+  if(el.id==='picker-source'){variableSource=el.value;renderVariablePicker();return;}
+  if(el.id==='forecast-month'){forecastMonth=el.value;renderAnalysis();return;}
   if(el.name==='variables'){
     variablesOpen=true;
-    selectedVariables=Array.from(document.querySelectorAll<HTMLInputElement>('input[name=variables]:checked')).map(x=>x.value);
+    selectedVariables=el.checked
+      ? [...selectedVariables.filter(id=>id!==el.value),el.value]
+      : selectedVariables.filter(id=>id!==el.value);
     variable=phenomenon!.variables.find(v=>v.id===variable?.id && selectedVariables.includes(v.id)) || phenomenon!.variables.find(v=>v.id===selectedVariables[0]) || phenomenon!.variables[0];
     if(!selectedVariables.length)selectedVariables=[variable.id];
     renderControls();updateLayer();renderAnalysis();void refreshBackendData();return;

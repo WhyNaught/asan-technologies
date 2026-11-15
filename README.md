@@ -33,6 +33,10 @@ There is **no synthetic data** in the app. Every variable comes from the connect
 
 NASA POWER and NOAA study areas are sampled on the provider's native grid (0.5° × 0.625°); areas needing more than 49 cells (large boxes, Worldwide) use an even 7 × 7 stratified sample, and results are cosine-latitude weighted in the browser. Giovanni time series are averaged by NASA over the selected bounding box. Trends use least-squares regression (t-test, 95% CI) plus the non-parametric Mann-Kendall test with Sen's slope; seasonal anomalies are on by default. Monthly values are autocorrelated, so p-values are indicative. POWER's temperature, humidity and soil variables are modeled reanalysis, not raw satellite retrievals.
 
+Choose **Guide me to variables** to filter monthly variables by topic and provider, or **Select data variables myself** to browse the connected catalogue. With multiple selected variables, the first is Y in an exploratory autoregression that uses lagged Y, lagged predictors, and elapsed time. The time coefficient is tested with a two-sided p-value; forecasts let you choose a month and report a standard deviation and 95% prediction interval. Future predictors are held at their latest observed values, so this is a scenario estimate, not a causal forecast. Giovanni series are area averages and do not provide gridded map measurements.
+
+Parts of `frontend/src/analysis.ts`, `frontend/src/analysis.test.ts`, `frontend/src/app.ts`, `frontend/src/backend.ts`, `frontend/src/registry.ts`, `frontend/src/types.ts`, `frontend/src/jstat.d.ts`, and `frontend/src/styles.css` were generated with AI assistance and reviewed and tested as part of this project.
+
 Direct PM2.5, acid deposition/rainwater pH, soil pH, and mineral-composition datasets are not included. Giovanni's aerosol optical depth is not a substitute for PM2.5, and the available Giovanni integration does not provide gridded map values. Phenomena without an appropriate connected dataset were removed from the catalogue rather than faked; see GitHub issue #3.
 
 ## Finding trends

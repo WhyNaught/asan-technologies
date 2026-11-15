@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, correlate, mannKendall, monthlyAnomalies } from './analysis.ts';
+import { analyze, correlate, forecastAutoregression, forecastLinearTrend, mannKendall, monthlyAnomalies, seasonalCycle } from './analysis.ts';
 
 const observations = (slope: number) => Array.from({ length: 120 }, (_, i) => ({
   date: new Date(Date.UTC(2015, i, 1)).toISOString().slice(0, 10),
@@ -44,4 +44,42 @@ test('Mann-Kendall detects a monotonic trend and ignores a flat series', () => {
   const up = mannKendall(Array.from({length: 40}, (_, i) => i + (i % 3)));
   assert.ok(up.p < 0.001 && up.sen > 0.9);
   assert.equal(mannKendall(Array(20).fill(5)).p, 1);
+});
+
+test('seasonality test distinguishes a repeating monthly cycle from a flat series', () => {
+  const rows = observations(0).map((row, i) => ({...row, value: i % 12}));
+  const seasonal = seasonalCycle(rows);
+  assert.ok(seasonal.p < 0.001);
+  assert.equal(seasonal.amplitude, 11);
+  assert.equal(seasonalCycle(observations(0)).p, 1);
+});
+
+test('linear forecast reports a future estimate and a prediction interval', () => {
+  const rows = observations(0.2).map((row, i) => ({...row, value: row.value + Math.sin(i * 0.7)}));
+  const prediction = forecastLinearTrend(rows, '2030-12-01');
+  assert.ok(prediction.value > rows.at(-1)!.value);
+  assert.ok(prediction.lower < prediction.value && prediction.value < prediction.upper);
+  assert.ok(prediction.standardDeviation > 0);
+});
+
+test('autoregression uses lagged response and covariates, and tests the time trend', () => {
+  const x = Array.from({length: 72}, (_, i) => ({
+    date: new Date(Date.UTC(2015, i, 1)).toISOString().slice(0, 10),
+    value: Math.sin(i * 0.6) + Math.cos(i * 0.13),
+  }));
+  const y: {date: string; value: number}[] = [];
+  for (let i = 0; i < x.length; i++) {
+    const previous = y[i - 1]?.value ?? 0;
+    const predictor = x[i - 1]?.value ?? x[i].value;
+    y.push({date: x[i].date, value: 0.65 * previous + 1.2 * predictor + 0.025 * i / 12});
+  }
+  const result = forecastAutoregression(y, [x], '2022-12-01');
+  assert.ok(Math.abs(result.slope - 0.25) < 1e-6);
+  assert.ok(result.p < 0.05);
+  assert.ok(Number.isFinite(result.value));
+  assert.ok(result.lower <= result.value && result.value <= result.upper);
+  assert.equal(result.n, 71);
+  assert.throws(() => forecastAutoregression(y, [x], '2020-12-01'));
+  const withGap = x.filter((_, index) => index !== 30);
+  assert.equal(forecastAutoregression(y, [withGap], '2022-12-01').n, 69);
 });

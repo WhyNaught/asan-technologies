@@ -1,25 +1,25 @@
 import type { Phenomenon, Variable } from './types';
-// Every variable is served by the ASAN API from a real NASA or NOAA dataset (`apiId` = the API variable id).
-const v = (id: string, name: string, unit: string, layer: Variable['layer'], domain: [number, number], apiId: string, source: string): Variable => ({ id, name, unit, layer, domain, global: true, apiId, source });
+// Every variable comes from a connected real data source (`apiId` = the API variable or dataset id).
+const v = (id: string, name: string, unit: string, layer: Variable['layer'], domain: [number, number], apiId: string, source: string, topic: string): Variable => ({ id, name, unit, layer, domain, global: true, apiId, source, topic, cadence: 'monthly' });
 export const variables = {
-  modis: v('modis-lst', 'Land surface temperature (MODIS, 1 km)', '°C', 'heat', [-10, 60], 'modis_lst', 'NASA MODIS MOD11A2 (1 km)'),
-  temperature: v('temperature', 'Earth skin temperature', '°C', 'heat', [-10, 50], 'earth_skin_temperature', 'NASA POWER'),
-  air: v('air', 'Air temperature (2 m)', '°C', 'scalar', [-30, 45], 'air_temperature', 'NASA POWER'),
-  tmax: v('tmax', 'Maximum air temperature (2 m)', '°C', 'heat', [-20, 50], 'max_air_temperature', 'NASA POWER'),
-  humidity: v('humidity', 'Relative humidity (2 m)', '%', 'scalar', [0, 100], 'relative_humidity', 'NASA POWER'),
-  dewPoint: v('dew-point', 'Dew point temperature (2 m)', '°C', 'scalar', [-20, 30], 'dew_point_temperature', 'NASA POWER'),
-  albedo: v('albedo', 'Surface albedo', 'fraction', 'scalar', [0, 0.9], 'surface_albedo', 'NASA POWER'),
-  precipitation: v('precipitation', 'Precipitation', 'mm/day', 'scalar', [0, 15], 'precipitation', 'NASA POWER'),
-  rootWet: v('root-wetness', 'Root-zone soil wetness', 'fraction', 'scalar', [0, 1], 'root_zone_soil_wetness', 'NASA POWER'),
-  topWet: v('surface-wetness', 'Surface soil wetness', 'fraction', 'scalar', [0, 1], 'surface_soil_wetness', 'NASA POWER'),
-  et: v('evapotranspiration', 'Evapotranspiration', 'W/m²', 'scalar', [0, 150], 'evapotranspiration', 'NASA POWER'),
-  solar: v('solar', 'Surface solar irradiance', 'W/m²', 'scalar', [0, 350], 'solar_irradiance', 'NASA POWER'),
-  longwave: v('longwave', 'Surface longwave irradiance', 'W/m²', 'scalar', [150, 450], 'longwave_irradiance', 'NASA POWER'),
-  wind: v('wind', 'Wind speed (10 m)', 'm/s', 'scalar', [0, 12], 'wind_speed', 'NASA POWER'),
-  sst: v('sst', 'Sea surface temperature', '°C', 'heat', [-2, 32], 'sea_surface_temperature', 'NOAA HadISST'),
-  oni: v('oni', 'Oceanic Niño Index (Niño 3.4)', '°C anomaly', 'scalar', [-3, 3], 'nino34_index', 'NOAA CPC'),
-  giovanniAod: { ...v('giovanni-aod', 'Aerosol optical depth (MODIS Aqua, 550 nm)', '1', 'scalar', [0, 1], 'MYD08_M3_6_1_Aerosol_Optical_Depth_Land_And_Ocean_Mean_Mean', 'NASA Giovanni · MODIS Aqua'), provider: 'giovanni' as const, areaSeriesOnly: true },
-  giovanniPrecipitation: { ...v('giovanni-precipitation', 'Precipitation rate (GPM IMERG)', 'mm/hr', 'scalar', [0, 15], 'GPM_3IMERGM_07_precipitation', 'NASA Giovanni · GPM IMERG'), provider: 'giovanni' as const, areaSeriesOnly: true },
+  modis: v('modis-lst', 'Land surface temperature (MODIS, 1 km)', '°C', 'heat', [-10, 60], 'modis_lst', 'NASA MODIS MOD11A2 (1 km)', 'Temperature and atmosphere'),
+  temperature: v('temperature', 'Earth skin temperature', '°C', 'heat', [-10, 50], 'earth_skin_temperature', 'NASA POWER', 'Temperature and atmosphere'),
+  air: v('air', 'Air temperature (2 m)', '°C', 'scalar', [-30, 45], 'air_temperature', 'NASA POWER', 'Temperature and atmosphere'),
+  tmax: v('tmax', 'Maximum air temperature (2 m)', '°C', 'heat', [-20, 50], 'max_air_temperature', 'NASA POWER', 'Temperature and atmosphere'),
+  humidity: v('humidity', 'Relative humidity (2 m)', '%', 'scalar', [0, 100], 'relative_humidity', 'NASA POWER', 'Temperature and atmosphere'),
+  dewPoint: v('dew-point', 'Dew point temperature (2 m)', '°C', 'scalar', [-20, 30], 'dew_point_temperature', 'NASA POWER', 'Temperature and atmosphere'),
+  albedo: v('albedo', 'Surface albedo', 'fraction', 'scalar', [0, 0.9], 'surface_albedo', 'NASA POWER', 'Energy and land'),
+  precipitation: v('precipitation', 'Precipitation', 'mm/day', 'scalar', [0, 15], 'precipitation', 'NASA POWER', 'Water and drought'),
+  rootWet: v('root-wetness', 'Root-zone soil wetness', 'fraction', 'scalar', [0, 1], 'root_zone_soil_wetness', 'NASA POWER', 'Water and drought'),
+  topWet: v('surface-wetness', 'Surface soil wetness', 'fraction', 'scalar', [0, 1], 'surface_soil_wetness', 'NASA POWER', 'Water and drought'),
+  et: v('evapotranspiration', 'Evapotranspiration', 'W/m²', 'scalar', [0, 150], 'evapotranspiration', 'NASA POWER', 'Water and drought'),
+  solar: v('solar', 'Surface solar irradiance', 'W/m²', 'scalar', [0, 350], 'solar_irradiance', 'NASA POWER', 'Energy and land'),
+  longwave: v('longwave', 'Surface longwave irradiance', 'W/m²', 'scalar', [150, 450], 'longwave_irradiance', 'NASA POWER', 'Energy and land'),
+  wind: v('wind', 'Wind speed (10 m)', 'm/s', 'scalar', [0, 12], 'wind_speed', 'NASA POWER', 'Energy and land'),
+  sst: v('sst', 'Sea surface temperature', '°C', 'heat', [-2, 32], 'sea_surface_temperature', 'NOAA HadISST', 'Oceans and climate'),
+  oni: v('oni', 'Oceanic Niño Index (Niño 3.4)', '°C anomaly', 'scalar', [-3, 3], 'nino34_index', 'NOAA CPC', 'Oceans and climate'),
+  giovanniAod: { ...v('giovanni-aod', 'Aerosol optical depth (MODIS Aqua, 550 nm)', '1', 'scalar', [0, 1], 'MYD08_M3_6_1_Aerosol_Optical_Depth_Land_And_Ocean_Mean_Mean', 'NASA Giovanni · MODIS Aqua', 'Air quality and rainfall'), provider: 'giovanni', areaSeriesOnly: true },
+  giovanniPrecipitation: { ...v('giovanni-precipitation', 'Precipitation rate (GPM IMERG)', 'mm/hr', 'scalar', [0, 15], 'GPM_3IMERGM_07_precipitation', 'NASA Giovanni · GPM IMERG', 'Air quality and rainfall'), provider: 'giovanni', areaSeriesOnly: true },
 };
 const groups: [string, [string, string, Variable[]][]][] = [
   ['Atmosphere', [
