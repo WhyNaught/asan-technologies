@@ -1,10 +1,29 @@
-import { grid } from './data';
+import { grid, inside } from './data';
 import type { Cell, Observation, StudyArea, Variable } from './types';
 
 const apiBase = import.meta.env?.VITE_API_BASE_URL || '/api';
 type ApiResponse = { data_mode: string; locations: { coordinate: { latitude: number; longitude: number }; series: { variable: string; source?: string; observations: { timestamp: string; value: number }[] }[] }[] };
-// shortcut: each sample is one NASA POWER call server-side; 16 keeps regions responsive, raise for denser maps.
-const MAX_SAMPLES = 16;
+// shortcut: each sample is one NASA POWER call server-side (fetched in parallel); raise if regions need denser maps.
+const MAX_SAMPLES = 49;
+// NASA POWER (MERRA-2) native grid: 0.5° latitude x 0.625° longitude. Sampling finer than this only repeats values.
+const DLAT = 0.5, DLON = 0.625;
+export function nativeCells(area: StudyArea): Omit<Cell, 'value'>[] {
+  const snap = (c: Omit<Cell, 'value'>): [string, Omit<Cell, 'value'>] => {
+    const lat = Math.max(-89.75, Math.min(89.75, Math.round(c.lat / DLAT) * DLAT)), lon = Math.round(c.lon / DLON) * DLON;
+    return [`${lat},${lon}`, {lat, lon, bounds: [lon - DLON / 2, lat - DLAT / 2, lon + DLON / 2, lat + DLAT / 2]}];
+  };
+  const unique = new Map(grid(area).map(snap));
+  if (unique.size <= MAX_SAMPLES) return [...unique.values()];
+  // Large area: even 7x7 stratified sample over the bounds instead of a row-major stride (which would hit only a few columns).
+  const b = area.kind === 'global' ? [-180, -85, 180, 85] : area.bounds!, n = Math.floor(Math.sqrt(MAX_SAMPLES)), cells: Omit<Cell, 'value'>[] = [];
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const lon = b[0] + (x + 0.5) * (b[2] - b[0]) / n, lat = b[1] + (y + 0.5) * (b[3] - b[1]) / n;
+    const dx = (b[2] - b[0]) / n, dy = (b[3] - b[1]) / n;
+    // Each sample stands for its stratum, so the map tile covers the stratum; the data itself is one native cell inside it.
+    if (!area.polygon || inside([lon, lat], area.polygon)) cells.push({lon, lat, bounds: [lon - dx / 2, lat - dy / 2, lon + dx / 2, lat + dy / 2]});
+  }
+  return [...new Map(cells.map(c => [snap(c)[0], {...snap(c)[1], bounds: c.bounds}] as const)).values()];
+}
 let catalog: Promise<Set<string>> | undefined;
 async function availableVariables() {
   catalog ??= fetch(`${apiBase}/data/variables`, {signal: AbortSignal.timeout(10000)}).then(async response => {
@@ -19,7 +38,7 @@ export async function fetchBackendSeries(variables: Variable[], area: StudyArea)
   if (!variables.length || variables.length > 3 || variables.some(v => !v.apiId)) throw new Error('Select up to three variables supported by the connected API.');
   const available=await availableVariables();
   if(variables.some(v=>!available.has(v.apiId!)))throw new Error('One or more selected variables are not available from the connected API.');
-  const cells = grid(area), samples = cells.length <= MAX_SAMPLES ? cells : Array.from({length: MAX_SAMPLES}, (_, i) => cells[Math.round(i * (cells.length - 1) / (MAX_SAMPLES - 1))]);
+  const cells = nativeCells(area), samples = cells.length <= MAX_SAMPLES ? cells : Array.from({length: MAX_SAMPLES}, (_, i) => cells[Math.round(i * (cells.length - 1) / (MAX_SAMPLES - 1))]);
   const response = await fetch(`${apiBase}/data/query`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({coordinates: samples.map(c => ({latitude: c.lat, longitude: c.lon})), variables: variables.map(v => v.apiId), start_date: '2015-01-01', end_date: '2024-12-01'}),

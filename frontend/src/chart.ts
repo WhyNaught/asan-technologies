@@ -3,8 +3,8 @@ import { analyze } from './analysis';
 export const number = (n: number, digits = 2) => Number.isFinite(n) ? n.toLocaleString('en', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';
 export const signed = (n: number) => `${n > 0 ? '+' : ''}${number(n)}`;
 export const dateLabel = (date: string) => new Date(date).toLocaleDateString('en', {month: 'short', year: 'numeric', timeZone: 'UTC'});
-export function renderChart(host: HTMLElement, rows: Observation[], unit: string, date: string, comparison?: {rows: Observation[]; name: string}, seasonal = false, label = 'Synthetic observations') {
-  const w = 1100, h = 260, left = 64, right = 24, top = 20, bottom = 38;
+export function renderChart(host: HTMLElement, rows: Observation[], unit: string, date: string, comparison?: {rows: Observation[]; name: string}, seasonal = false, label = 'Observations') {
+  const w = Math.max(320, Math.round(host.clientWidth) || 1100), h = 260, left = 64, right = 24, top = 20, bottom = 38;
   const data = [...rows, ...(comparison?.rows || [])].filter(r => Number.isFinite(r.value));
   if (!data.length) { host.innerHTML = '<p>No valid observations in this period.</p>'; return; }
   const minT = Date.parse(rows[0].date), maxT = Date.parse(rows.at(-1)!.date);
@@ -15,7 +15,7 @@ export function renderChart(host: HTMLElement, rows: Observation[], unit: string
   const result = analyze(rows);
   const fit = (date: string) => result.intercept + result.slopeYear * (Date.parse(date) - result.start) / (365.25 * 86400000);
   const ticks = Array.from({length: 5}, (_, i) => min - pad + i * (max - min + pad * 2) / 4);
-  const xTicks = Array.from({length: 5}, (_, i) => rows[Math.round(i * (rows.length - 1) / 4)]);
+  const xTicks = Array.from({length: w < 520 ? 3 : 5}, (_, i) => rows[Math.round(i * (rows.length - 1) / ((w < 520 ? 3 : 5) - 1))]);
   host.innerHTML = `<div class="chart-key"><span><i></i>${seasonal ? 'Monthly anomaly · '+label : label}</span><span><i class="dashed"></i>Linear trend</span>${comparison ? '<span><i class="compare-key"></i>Comparison</span>' : ''}<span class="chart-unit">${unit}</span></div>
   <div class="plot-wrap"><svg class="series-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Time series from ${dateLabel(rows[0].date)} to ${dateLabel(rows.at(-1)!.date)}, ${unit}. ${rows.filter(r => !Number.isFinite(r.value)).length} missing observations shown as gaps.">
     ${ticks.map(value => `<line class="grid-line" x1="${left}" x2="${w - right}" y1="${y(value)}" y2="${y(value)}"/><text x="${left - 12}" y="${y(value) + 4}" text-anchor="end">${number(value, Math.abs(value) < 1 ? 2 : 1)}</text>`).join('')}

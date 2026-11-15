@@ -1,4 +1,4 @@
-import type { Cell, Coordinate, DataAdapter, StudyArea, Variable } from './types';
+import type { Cell, Coordinate, StudyArea } from './types';
 export const places: StudyArea[] = [
   { name: 'Phoenix, Arizona', kind: 'region', lon: -112.07, lat: 33.45, bounds: [-112.35, 33.2, -111.8, 33.75] },
   { name: 'Lagos, Nigeria', kind: 'region', lon: 3.38, lat: 6.52, bounds: [3.15, 6.35, 3.65, 6.75] },
@@ -29,39 +29,4 @@ export function grid(area: StudyArea): Omit<Cell, 'value'>[] {
   }
   return cells;
 }
-function sample(v: Variable, lon: number, lat: number, index: number) {
-  const t = index / 12, season = Math.sin((index % 12) / 12 * 2 * Math.PI - lat / 45), spatial = Math.sin(lon * 0.12) * Math.cos(lat * 0.15);
-  const noise = 0.17 * Math.sin(index * 2.399 + lon) + 0.11 * Math.cos(index * 1.71 + lat);
-  const enso = Math.sin(index / 8) + 0.5 * Math.cos(index / 15);
-  switch (v.id) {
-    case 'temperature': return 28 - Math.abs(lat) * 0.12 + 7 * season + 0.065 * t + spatial * 3 + noise;
-    case 'air': return 23 - Math.abs(lat) * 0.12 + 5 * season + 0.035 * t + spatial + noise;
-    case 'vegetation': return Math.max(0, Math.min(1, 0.55 + 0.15 * season - 0.004 * t + spatial * 0.08 + noise * 0.04));
-    case 'vegetation-anomaly': return 0.04 * season - 0.004 * t + spatial * 0.04 + noise * 0.04;
-    case 'albedo': return 0.22 + spatial * 0.04 + 0.001 * t + noise * 0.01;
-    case 'built': return Math.max(0, Math.min(100, 45 + spatial * 25 + 0.8 * t + noise));
-    case 'drought': return -0.05 * t + 0.5 * season + spatial * 0.5 + noise;
-    case 'moisture': return Math.max(0, 0.25 - 0.002 * t + 0.06 * season + spatial * 0.03 + noise * 0.02);
-    case 'sst': return enso + 0.025 * t + spatial * 0.3 + noise * 0.2;
-    case 'precipitation': return enso * 25 * Math.cos(lat / 30) + season * 15 + spatial * 10 + 0.3 * t + noise * 5;
-    case 'wind': return -enso * 1.3 + spatial + noise;
-    default: return NaN;
-  }
-}
 export const dates = Array.from({length: 120}, (_, i) => new Date(Date.UTC(2015, i, 1)).toISOString().slice(0, 10));
-export const mockAdapter: DataAdapter = {
-  status: 'Synthetic demonstration · deterministic geographic field',
-  field(variable, area, date) {
-    const i = dates.indexOf(date);
-    if (i < 0) return [];
-    return grid(area).map(c => ({...c, value: sample(variable, c.lon, c.lat, i)}));
-  },
-  series(variable, area) {
-    return dates.map((date, index) => {
-      const cells = this.field(variable, area, date);
-      const weight = cells.reduce((s, c) => s + Math.cos(c.lat * Math.PI / 180), 0);
-      const value = cells.reduce((s, c) => s + c.value * Math.cos(c.lat * Math.PI / 180), 0) / weight;
-      return {date, value: index > 0 && index % 47 === 0 ? NaN : value};
-    });
-  },
-};

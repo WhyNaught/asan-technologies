@@ -13,8 +13,20 @@ test('API adapter requests bounded area samples and returns a weighted dated ser
   try{
     const result=await fetchBackendSeries([variables.temperature],{name:'Test region',kind:'region',lon:0,lat:0,bounds:[-1,-1,1,1]});
     const rows=result.series.get('temperature')!,field=result.field.get('temperature')!;
-    assert.equal((posted!.coordinates as unknown[]).length,16);
+    const sent=posted!.coordinates as {latitude:number;longitude:number}[];assert.equal(new Set(sent.map(c=>`${c.latitude},${c.longitude}`)).size,sent.length);assert.ok(sent.every(c=>Math.abs(c.latitude/0.5-Math.round(c.latitude/0.5))<1e-9));
     assert.equal(rows.length,120);assert.ok(Math.abs(rows[0].value)<1e-10);assert.ok(Math.abs(rows[119].value-119)<1e-10);
-    assert.equal(field.length,120);assert.equal(field[0].length,16);
+    assert.equal(field.length,120);assert.ok(field[0].length>=1);
   }finally{globalThis.fetch=original;}
+});
+
+test('worldwide sampling is spread across the globe and stays within the API limit', async () => {
+  const { nativeCells } = await import('./backend.ts');
+  const cells = nativeCells({name: 'Worldwide', kind: 'global', lon: 0, lat: 0});
+  assert.ok(cells.length > 0 && cells.length <= 49);
+  assert.ok(new Set(cells.map(c => c.lat)).size >= 6 && new Set(cells.map(c => c.lon)).size >= 6);
+});
+
+test('every catalogued variable is backed by a real data source', async () => {
+  const { phenomena } = await import('./registry.ts');
+  for (const p of phenomena) for (const v of p.variables) assert.ok(v.apiId && v.source, `${p.name} / ${v.name}`);
 });
