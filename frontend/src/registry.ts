@@ -18,12 +18,15 @@ export const variables = {
   wind: v('wind', 'Wind speed (10 m)', 'm/s', 'scalar', [0, 12], 'wind_speed', 'NASA POWER'),
   sst: v('sst', 'Sea surface temperature', '°C', 'heat', [-2, 32], 'sea_surface_temperature', 'NOAA HadISST'),
   oni: v('oni', 'Oceanic Niño Index (Niño 3.4)', '°C anomaly', 'scalar', [-3, 3], 'nino34_index', 'NOAA CPC'),
+  giovanniAod: { ...v('giovanni-aod', 'Aerosol optical depth (MODIS Aqua, 550 nm)', '1', 'scalar', [0, 1], 'MYD08_M3_6_1_Aerosol_Optical_Depth_Land_And_Ocean_Mean_Mean', 'NASA Giovanni · MODIS Aqua'), provider: 'giovanni' as const, areaSeriesOnly: true },
+  giovanniPrecipitation: { ...v('giovanni-precipitation', 'Precipitation rate (GPM IMERG)', 'mm/hr', 'scalar', [0, 15], 'GPM_3IMERGM_07_precipitation', 'NASA Giovanni · GPM IMERG'), provider: 'giovanni' as const, areaSeriesOnly: true },
 };
 const groups: [string, [string, string, Variable[]][]][] = [
   ['Atmosphere', [
     ['Urban heat islands', 'Investigate how built environments retain heat.', [variables.modis, variables.temperature, variables.air, variables.humidity, variables.dewPoint, variables.albedo]],
     ['Heatwaves and humid heat', 'Explore prolonged heat and humidity.', [variables.modis, variables.tmax, variables.air, variables.humidity, variables.dewPoint]],
     ['Monsoon and rainfall shifts', 'Explore changes in seasonal rainfall and humidity.', [variables.precipitation, variables.humidity]],
+    ['Air quality and rainfall (Giovanni)', 'Explore Giovanni aerosol and precipitation time series averaged over your selected area.', [variables.giovanniAod, variables.giovanniPrecipitation]],
   ]],
   ['Water', [
     ['Persistent drought', 'Follow sustained water deficits in rain, soil and evaporation.', [variables.precipitation, variables.rootWet, variables.topWet, variables.et]],

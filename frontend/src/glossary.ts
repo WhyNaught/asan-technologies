@@ -20,9 +20,13 @@ export const glossary: Record<string, string> = {
   precipitation: 'Average rain and snow rate (millimetres of water per day) over the month.',
   sst: 'Temperature of the top of the ocean. Swings in the tropical Pacific drive El Niño and La Niña. Only ocean areas have data.',
   wind: 'Average wind speed 10 metres above the ground.',
+  'giovanni-aod': 'Aerosol optical depth estimates how much sunlight is blocked or scattered by particles throughout the atmospheric column. It is an aerosol indicator, not a direct measurement of ground-level PM2.5.',
+  'giovanni-precipitation': 'Monthly GPM IMERG precipitation rate averaged over the selected area. Giovanni returns one area-averaged time series rather than per-pixel map values.',
 };
 export const methodNote = 'A trend is “significant” when it is unlikely (below the chosen α, usually 5%) to be just random ups and downs. The t-test assumes a straight-line trend with bell-shaped noise; the Mann-Kendall test makes no such assumption and only asks whether values tend to rise or fall over time.';
 // Variable-specific warnings shown next to the trend verdict.
 export const caution: Record<string, string> = {
   'modis-lst': 'Terra’s overpass time has drifted earlier since about 2020, which cools its daytime readings, so multi-year MODIS trends (especially a falling one) can be sensor artefacts rather than real change. Trust MODIS for spatial patterns inside a city and for the seasonal cycle, and cross-check any trend against NASA POWER skin temperature.',
+  'giovanni-aod': 'Aerosol optical depth is a column-wide aerosol proxy, not ground-level PM2.5. Giovanni returns the average for the selected bounding box rather than individual map-cell values.',
+  'giovanni-precipitation': 'This Giovanni series is averaged over the selected bounding box, and the available period depends on the underlying GPM product coverage.',
 };

@@ -1,118 +1,48 @@
-# Asan: An Interactive Earth Systems Data Analysis Tool
+# ASAN Earth System Explorer
 
-## Urbanization time-series API
+The Vite/TypeScript client uses Cesium for the globe and a small feature-based frontend under `/frontend/src/`.
 
-The API accepts coordinates, monthly urbanization variables, and a month-bounded
-date range. Air temperature (`T2M`), relative humidity (`RH2M`), dew-point
-temperature (`T2MDEW`), and earth skin temperature (`TS`) are fetched from NASA
-POWER. Night-light radiance currently returns **synthetic example values**; it is
-not an observation and must not be used for analysis.
+## Run the API and frontend
 
-Run the API from the repository root:
+From the repository root, start the synthetic FastAPI service:
 
 ```bash
 python -m pip install -r api/requirements.txt
-cp .env.template .env
-uvicorn api.main:app --reload
+python -m uvicorn api.main:app --reload --port 8001
 ```
 
-Set `APPEEARS_USERNAME` and `APPEEARS_PASSWORD` in `.env` to your NASA Earthdata
-Login credentials. The API reads them on the server and does not send them to
-clients. Keep `.env` private; it is excluded from Git.
+In a second terminal:
 
-Interactive API documentation is available at `http://127.0.0.1:8000/docs`.
-
-### NASA AppEEARS surface-temperature downloads
-
-`GET /data/appeears/products` lists the point-request products currently available
-through AppEEARS:
-
-| Product | Resolution | Cadence | Platform |
-|---|---|---|---|
-| `MOD11A1` | 1 km | Daily | Terra |
-| `MYD11A1` | 1 km | Daily | Aqua |
-| `MOD11A2` | 1 km | 8-day composite | Terra |
-
-These requests use collection `.061` and include both daytime and nighttime LST
-layers. AppEEARS currently returns 404 for `MOD11C3` collection `.006` and `.061`,
-so it is not offered as a request option.
-
-AppEEARS requests use the separate `POST /data/appeears/query` endpoint. Select
-one product, and provide any inclusive date range:
-
-```json
-{
-  "coordinates": [
-    { "latitude": 40.7128, "longitude": -74.006 },
-    { "latitude": 34.0522, "longitude": -118.2437 }
-  ],
-  "product": "MOD11A1",
-  "start_date": "2024-01-01",
-  "end_date": "2024-01-31"
-}
+```bash
+cd frontend
+npm install
+Copy-Item .env.example .env.local
+npm run dev
 ```
 
-AppEEARS requests submit a point task, wait up to 10 minutes for completion, and
-return normalized JSON with separate daytime and nighttime series. AppEEARS
-Kelvin values are converted to °C; fill values are returned as `null`. Responses
-include the selected product and cadence (`daily` or `8-day`).
+Vite proxies `/api` to `http://127.0.0.1:8001`. Override with `ASAN_API_ORIGIN` for a different local API host. For a deployed frontend, set `VITE_API_BASE_URL` to the deployed API origin and set `ASAN_FRONTEND_ORIGINS` on the API to the frontend origin(s).
 
-AppEEARS observations include the actual product cadence; for `MOD11A2`, that is
-an 8-day composite, not daily observations. The inclusive date range may be up to
-120 months and supports up to 50 unique coordinates. AppEEARS enforces its own
-product coverage and availability limits.
+## Data and analysis
 
-The query response includes separate daytime and nighttime series for each point:
+There is **no synthetic data** in the app. Every variable comes from the connected ASAN API (`GET /data/variables`, `POST /data/query`), which serves:
 
-```json
-{
-  "data_mode": "nasa_appeears",
-  "requested_period": ["2024-01-01", "2024-01-31"],
-  "locations": [
-    {
-      "coordinate": { "latitude": 40.7128, "longitude": -74.006 },
-      "series": [
-        {
-          "variable": "daytime_surface_temperature",
-          "label": "Daytime surface temperature",
-          "layer": "LST_Day_1km",
-          "product": "MOD11A1",
-          "unit": "°C",
-          "cadence": "daily",
-          "source": "NASA APPEEARS",
-          "observations": [{ "timestamp": "2024-01-01", "value": 26.85 }]
-        }
-      ]
-    }
-  ]
-}
-```
+- **NASA POWER** (MERRA-2 / CERES / GPM-corrected): skin, air and max temperature, humidity, dew point, precipitation, root-zone and surface soil wetness, evapotranspiration, solar and longwave irradiance, wind speed, albedo. Monthly, 2015–2024.
+- **NOAA HadISST** (via ERDDAP): sea surface temperature, 1° grid, ocean cells only.
+- **NOAA CPC**: Oceanic Niño Index (Niño 3.4), a global index.
+- **NASA Giovanni**: GPM IMERG version 07 precipitation and MODIS Aqua version 6.1 monthly aerosol optical depth as area-averaged time series. Giovanni uses the selected area's bounding box; it does not supply per-cell values to the map. Its CSV downloads require NASA Earthdata Login credentials configured on the API as `EARTHDATA_USERNAME` and `EARTHDATA_PASSWORD`; the API loads these from the repository-root `.env` or its process environment at startup, so restart the API after changing them. On failures, the API returns the provider error and tailored suggestions in the response. Aerosol optical depth is a column proxy, not surface PM2.5. Dataset coverage varies, so some date/area requests may have no data.
 
-`POST /data/appeears/request` remains available for users who want the original
-AppEEARS task bundle as a ZIP rather than normalized JSON.
+NASA POWER and NOAA study areas are sampled on the provider's native grid (0.5° × 0.625°); areas needing more than 49 cells (large boxes, Worldwide) use an even 7 × 7 stratified sample, and results are cosine-latitude weighted in the browser. Giovanni time series are averaged by NASA over the selected bounding box. Trends use least-squares regression (t-test, 95% CI) plus the non-parametric Mann-Kendall test with Sen's slope; seasonal anomalies are on by default. Monthly values are autocorrelated, so p-values are indicative. POWER's temperature, humidity and soil variables are modeled reanalysis, not raw satellite retrievals.
 
-### NASA POWER monthly time-series
+Direct PM2.5, acid deposition/rainwater pH, soil pH, and mineral-composition datasets are not included. Giovanni's aerosol optical depth is not a substitute for PM2.5, and the available Giovanni integration does not provide gridded map values. Phenomena without an appropriate connected dataset were removed from the catalogue rather than faked; see GitHub issue #3.
 
-`GET /data/variables` lists supported monthly NASA POWER variables.
-`POST /data/query` accepts NASA POWER variables:
+## Finding trends
 
-```json
-{
-  "coordinates": [{ "latitude": 40.7128, "longitude": -74.006 }],
-  "variables": [
-    "air_temperature",
-    "relative_humidity",
-    "dew_point_temperature",
-    "earth_skin_temperature",
-    "night_light_radiance"
-  ],
-  "start_date": "2024-01-01",
-  "end_date": "2024-03-01"
-}
-```
+- **Find trends in this area** tests every variable (13 NASA POWER, plus NOAA SST over ocean) for the chosen area and period, then ranks them by Mann-Kendall evidence. A trend counts as significant only if the t-test and Mann-Kendall both pass; ★ marks those that survive a Bonferroni correction for testing many variables.
+- **Map the trend per decade** (legend toggle) colours each grid cell by its own linear trend, showing where the change is happening.
+- **MODIS 1 km** land surface temperature (ORNL DAAC service, no credentials) adds city-scale detail; the first 10-year series for a new place takes about 2 minutes server-side and is then cached in `api/.cache` (`python -m api.prewarm_modis` pre-computes the demo cities).
 
-Dates must be the first day of a month. The inclusive period is limited to 120
-months. Coordinates must be unique and within valid latitude/longitude ranges.
-NASA POWER parameters are fetched together in one request per coordinate. NASA
-POWER reports monthly data through the previous year, so recent or otherwise
-unavailable months can result in a provider error.
+## Cesium setup
+
+Set `NEXT_PUBLIC_CESIUM_ION_TOKEN` in `frontend/.env.local` for permitted Cesium ion imagery and World Terrain. Restrict the public token to the app's domains and read-only assets. Without it, the client shows its clearly labeled low-resolution NASA tiled overview and ellipsoid terrain. Do not use the basemap as scientific data. Provider attribution remains visible.
+
+`npm run build` copies Cesium workers/assets into `public/cesium` before the Vite production build.

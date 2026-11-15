@@ -6,7 +6,7 @@ import { renderChart, number, signed, dateLabel } from './chart';
 import { EarthMap } from './map';
 import { ionToken } from './providers';
 import { palette } from './layers';
-import { advance, setPeriod, type TimelineState } from './timeline';
+import { adjustPeriodEndpoint, advance, setPeriod, type TimelineState } from './timeline';
 import { icon } from './icons';
 import { glossary, methodNote, caution } from './glossary';
 import { startTour, stopTour, type TourStep } from './tour';
@@ -25,11 +25,12 @@ let variablesOpen = false;
 let ready = false, analysisOpen = false, expanded = false, anomalies = true, alpha = 0.05, opacity = 0.65;
 const hiddenLayers = new Set<string>();
 let trendMap = false, trendCache: {field: unknown; key: string; cells: import('./types').Cell[]} | undefined;
-let scanId = 0, scan: {status: 'idle' | 'loading' | 'done' | 'error'; area?: StudyArea; period: string; results: TrendResult[]; field: Map<string, import('./types').Cell[][]>; sources: Map<string, string>; error: string} = {status: 'idle', period: '', results: [], field: new Map(), sources: new Map(), error: ''};
+let scanId = 0, scan: {status: 'idle' | 'loading' | 'done' | 'error'; area?: StudyArea; period: string; results: TrendResult[]; field: Map<string, import('./types').Cell[][]>; sources: Map<string, string>; error: string; warning?: string} = {status: 'idle', period: '', results: [], field: new Map(), sources: new Map(), error: ''};
 let modisMaps = new Map<number, ModisMap>(), modisInflight = new Set<number>(), modisPending = '', modisError = '';
 const isModis = (v?: Variable) => v?.apiId === 'modis_lst';
+const isGiovanni = (v?: Variable) => v?.provider === 'giovanni';
 let backendSources = new Map<string, string>();
-let dataLoading = false, dataError = '', backendFields = new Map<string, import('./types').Cell[][]>(), requestId = 0;
+let dataLoading = false, dataError = '', dataErrorRecommendations: string[] = [], backendFields = new Map<string, import('./types').Cell[][]>(), requestId = 0;
 let compare = false, compareMode = 'region', comparePlace = 1, compareVariable = '', compareStart = 0, compareEnd = 59;
 let paletteMode: 'all' | 'phenomena' = 'all', category = '', query = '', remote: StudyArea[] = [], catalogueOpen = false;
 let playTimer: ReturnType<typeof setInterval> | undefined;
@@ -81,21 +82,27 @@ let dataPromise: Promise<void> = Promise.resolve();
 function refreshBackendData() { return dataPromise = loadBackendData(); }
 async function loadBackendData() {
   const current=++requestId;
-  dataLoading=false;dataError='';backendFields=new Map();modisMaps=new Map();modisInflight=new Set();modisPending='';modisError='';
+  dataLoading=false;dataError='';dataErrorRecommendations=[];backendFields=new Map();modisMaps=new Map();modisInflight=new Set();modisPending='';modisError='';
   if(!phenomenon||!area||!selectedVariables.length)return;
   const selected=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!), regular=selected.filter(v=>!isModis(v)), modis=selected.find(isModis);
   if(modis)void loadModis(current,modis);
   if(!regular.length){renderControls();updateLayer();renderAnalysis();return;}
   dataLoading=true;renderControls();updateLayer();renderAnalysis();
   try{
-    const result=await fetchBackendSeries(regular,area);
+    const period={startDate:dates[timeline.start],endDate:dates[timeline.end]};
+    const result=await fetchBackendSeries(regular,area,3,period);
     if(current!==requestId)return;
     for(const [id,rows] of result.series)seriesCache.set(JSON.stringify([id,area]),rows);
-    backendFields=result.field;for(const [id,name] of result.sources)backendSources.set(id,name);dataLoading=false;dataError='';
+    backendFields=result.field;for(const [id,name] of result.sources)backendSources.set(id,name);dataLoading=false;dataError='';dataErrorRecommendations=[];
   }catch(error){
     if(current!==requestId)return;
     for(const v of regular)seriesCache.delete(JSON.stringify([v.id,area]));
-    dataLoading=false;dataError=(error as Error).message;toast(`Data unavailable: ${dataError}`);
+    dataLoading=false;dataError=(error as Error).message;
+    const recommendations=error&&typeof error==='object'&&'recommendations' in error
+      ? error.recommendations : undefined;
+    dataErrorRecommendations=Array.isArray(recommendations)
+      ? recommendations.filter((item):item is string=>typeof item==='string') : [];
+    toast(`Data unavailable: ${dataError}`);
   }
   renderControls();updateLayer();renderAnalysis();
 }
@@ -148,7 +155,7 @@ function renderControls() {
       ${area?'':`<div class="suggested-areas"><span>Quick picks</span>${places.slice(0,4).map(p=>`<button data-place="${escape(p.name)}">${escape(p.name.split(',')[0])}</button>`).join('')}</div>`}
       <details class="variable-picker"><summary>Variables <span>${selectedVariables.length} selected</span></summary><div class="variable-options">${phenomenon.variables.map(v=>{const unavailable=false,limit=selectedVariables.length>=3&&!selectedVariables.includes(v.id);return `<label class="${unavailable?'unavailable-variable':''}"><input type="checkbox" name="variables" value="${v.id}" ${selectedVariables.includes(v.id)?'checked':''} ${unavailable||limit?'disabled':''}>${v.name}<span>${escape(v.source)}</span></label>`}).join('')}</div></details>
       <div class="step-heading period-heading"><span>Study period</span><button data-action="period">${dates[timeline.start].slice(0,7)} – ${dates[timeline.end].slice(0,7)} ${icon('chevron')}</button></div>
-      ${dataLoading?'<p class="data-status" role="status">Requesting monthly series from ASAN API…</p>':dataError?`<p class="data-status error" role="status">${escape(dataError)} <button data-action="retry-data">Retry</button></p>`:''}
+      ${dataLoading?'<p class="data-status" role="status">Requesting monthly series from ASAN API…</p>':dataError?`<div class="data-status error" role="alert"><p>${escape(dataError)}</p>${dataErrorRecommendations.length?`<strong>What to try next</strong><ul>${dataErrorRecommendations.map(item=>`<li>${escape(item)}</li>`).join('')}</ul>`:''}<button data-action="retry-data">Retry</button></div>`:''}
       <button class="scan-action" data-action="scan" ${!area?'disabled':''}>${icon('search')}<span>Find trends in this area</span></button>
       ${phenomenon.demo ? `<button class="primary analyze-action" data-action="analyze" ${!area||dataLoading||!!dataError ? 'disabled' : ''}>Analyze ${selectedVariables.length} variable${selectedVariables.length===1?'':'s'} ${icon('arrow')}</button>` : '<p class="unsupported">Catalogue preview · data not connected yet. Try a highlighted demonstration.</p>'}</div>` : area ? `<button class="standalone-region surface" data-action="search">${icon('pin')}${escape(area.name)}</button>` : ''}`;
   const picker=$<HTMLDetailsElement>('.variable-picker');if(picker)picker.open=variablesOpen;
@@ -174,7 +181,7 @@ function cellKmOf(cells:{bounds:[number,number,number,number];lat:number}[]){con
 function buildLayers(): EnvironmentalLayer[] {
   if(!phenomenon||!variable||!area||dataLoading||dataError)return [];
   const selected=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!);
-  const context=isModis(variable)?selected.find(v=>!isModis(v)&&backendFields.has(v.id)):variable;
+  const context=isModis(variable)?selected.find(v=>!isModis(v)&&!isGiovanni(v)&&backendFields.has(v.id)):isGiovanni(variable)?undefined:variable;
   const layers:EnvironmentalLayer[]=[];
   if(context&&backendFields.get(context.id)?.[timeline.index]?.length){
     let cells=backendFields.get(context.id)![timeline.index],domain=context.domain,unit=context.unit,label=context.name,period:string|undefined;
@@ -196,7 +203,14 @@ function updateLayer() {
   void ensureModisMap();
   const layers=buildLayers();
   map.renderLayers(layers);
-  if(!layers.length){host.hidden=true;if(!dataLoading&&!dataError&&!selectedVariables.some(id=>isModis(phenomenon!.variables.find(v=>v.id===id)))&&backendFields.size)toast('No sample points fall inside this area. Draw a wider study area.');return;}
+  if(!layers.length){
+    if(isGiovanni(variable)){
+      host.hidden=false;
+      host.innerHTML=`<div class="legend-title">Area-averaged series</div><p class="legend-note">${escape(variable.name)} is averaged over the selected bounding box by NASA Giovanni. Giovanni does not provide per-cell values to this map layer, so the basemap is context only.</p>`;
+      return;
+    }
+    host.hidden=true;if(!dataLoading&&!dataError&&!selectedVariables.some(id=>isModis(phenomenon!.variables.find(v=>v.id===id)))&&backendFields.size)toast('No sample points fall inside this area. Draw a wider study area.');return;
+  }
   host.hidden=false;
   const rows=[...layers].reverse().map((l,i)=>{
     const colors=palette(l.kind,l.unit,l.source),tier=l.source.includes('MODIS')?'detail':'context',km=l.resolutionKm<1?number(l.resolutionKm,1):Math.round(l.resolutionKm);
@@ -228,7 +242,7 @@ function renderAnalysis() {
   host.innerHTML=`<div class="sheet-handle"></div><div class="analysis-header"><div><h2>${variable.name}${anomalies?' · seasonal anomalies':''}</h2><p>${escape(area.name)} · ${areaLabel(area)} · ${escape(backendSources.get(variable.id)||'loading')}</p></div><div class="sheet-actions">${button('expand-analysis','expand',expanded?'Reduce analysis workspace':'Expand analysis workspace')}${button('close-analysis','close','Close analysis')}</div></div>
   <div class="analysis-scroll"><div class="analysis-options">${periodControls()}<label class="anomaly-control"><input type="checkbox" id="anomalies" ${anomalies?'checked':''}> Seasonal anomalies</label><button class="text-button" data-action="compare">${icon('compare')}${compare?'Comparing series':'Add comparison'}</button></div>
   ${compare?`<div class="comparison-controls"><label>Compare with <select id="compare-mode">${['period','variable'].filter(m=>m!=='variable'||selectedVariables.length>1).map(m=>`<option value="${m}" ${compareMode===m?'selected':''}>${m==='region'?'Two regions':m==='period'?'Two periods':'Related variables'}</option>`).join('')}</select></label>${compareMode==='region'?`<label>With <select id="compare-place">${places.map((p,i)=>`<option value="${i}" ${i===comparePlace?'selected':''}>${p.name}</option>`).join('')}</select></label>`:compareMode==='period'?periodControls(compareStart,compareEnd,'compare'):`<label>With <select id="compare-variable">${phenomenon!.variables.filter(v=>selectedVariables.includes(v.id)&&v.id!==variable!.id).map(v=>`<option value="${v.id}" ${v.id===other?.variable.id?'selected':''}>${v.name}</option>`).join('')}</select></label>`}${button('remove-compare','close','Remove comparison')}</div>`:''}
-  <div class="analysis-variable-tabs" aria-label="Map layer"><span>Variable · map layer</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div><p class="interpretation">${summary} </p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}${caution[variable.id]?`<p class="definition caution"><b>Caution.</b> ${escape(caution[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
+  <div class="analysis-variable-tabs" aria-label="${isGiovanni(variable)?'Area-averaged series':'Map layer'}"><span>${isGiovanni(variable)?'Area-averaged series':'Variable · map layer'}</span>${selectedVariables.map(id=>{const v=phenomenon!.variables.find(item=>item.id===id)!;return `<button data-active-variable="${v.id}" aria-pressed="${v.id===variable!.id}">${v.name}</button>`}).join('')}</div>${isGiovanni(variable)?'<p class="definition">NASA Giovanni averages the data over the selected bounding box. The map is shown for geographic context only; these results are not per-pixel measurements. Aerosol optical depth is a column proxy, not a surface PM2.5 measurement. Giovanni does not provide soil pH, mineral composition, rainwater pH, or acid deposition in this integration.</p>':''}<p class="interpretation">${summary} </p>${glossary[variable.id]?`<p class="definition"><b>What is this?</b> ${escape(glossary[variable.id])}</p>`:''}${caution[variable.id]?`<p class="definition caution"><b>Caution.</b> ${escape(caution[variable.id])}</p>`:''}<p class="definition"><b>Reading the tests.</b> ${escape(methodNote)}</p><div id="chart" class="chart"></div><div class="chart-date-control">${button('play',timeline.playing?'pause':'play',timeline.playing?'Pause playback':'Play historical dates')}<output class="current-date">${dateLabel(dates[timeline.index])}</output><input id="analysis-time" type="range" min="${timeline.start}" max="${timeline.end}" value="${timeline.index}" aria-label="Analysis observation date"></div>
   <div class="metrics"><div><span>${variable.name} · Trend</span><strong>${signed(result.slope)} <small>${variable.unit} / decade</small></strong></div><div><span>Statistical significance</span><strong>p ${result.p<.001?'&lt; 0.001':'= '+number(result.p,3)}</strong><small>${result.significant?'Significant':'Not significant'} at α = ${alpha} · t-test</small></div><div><span>Mann-Kendall (non-parametric)</span><strong>p ${result.mk.p<.001?'&lt; 0.001':'= '+number(result.mk.p,3)}</strong><small>τ = ${number(result.mk.tau,2)} · Sen slope ${signed(result.mk.sen*120)} ${variable.unit}/decade · ${result.mk.p<alpha?'Significant':'Not significant'}</small></div><div><span>95% confidence interval</span><strong>${signed(result.ci[0])} to ${signed(result.ci[1])}</strong><small>${variable.unit} / decade</small></div><div><span>Coverage</span><strong>${rows[0].date.slice(0,4)}–${rows.at(-1)!.date.slice(0,4)}</strong><small>${result.n} monthly observations · ${result.missing} missing</small></div></div>
   ${other&&otherStats?`<p class="comparison-summary"><strong>${escape(other.name)}</strong>: ${signed(otherStats.slope)} ${other.variable.unit}/decade. The trends ${Math.sign(result.slope)===Math.sign(otherStats.slope)?'have the same direction':'have opposite directions'}. Different displayed slopes do not establish a statistically significant difference.${compareMode==='period'?' Periods align by elapsed month.':''}${other.variable.unit!==variable.unit?' The chart uses standardized values for comparable axes; slopes retain original units.':''}</p>`:''}
   <details class="analysis-more"><summary>Correlations & downloads</summary><div id="correlations"></div><div class="report-actions"><button class="text-button" data-action="report">Download scientific report</button><button class="text-button" data-action="csv">Download observations (CSV)</button></div></details><details class="methodology"><summary>How was this calculated?</summary><div class="method-content"><p>Ordinary least squares regresses values against actual elapsed years (365.25 days). Slope × 10 gives units per decade. A two-sided Student-t test of zero slope uses n − 2 degrees of freedom. The 95% confidence interval is slope ± t<sub>0.975</sub> × standard error. Missing values are excluded, never replaced with zero.</p><p>${anomalies?'Seasonal anomalies subtract each calendar month’s 2015–2024 mean, calculated over the complete baseline before filtering the study period.':'Seasonality is retained. Enable seasonal anomalies to subtract each calendar month’s 2015–2024 baseline mean.'} The climatology is estimated from the same demonstration series and may influence trend estimates.</p><p>Study period: ${dateLabel(rows[0].date)}–${dateLabel(rows.at(-1)!.date)}. ${area.kind==='point'?'This is a point/grid-cell sample, not a regional average.':'NASA/NOAA native-grid cells (up to 49, evenly sampled for large areas) inside the study region are weighted by cosine of latitude; polygon edges use center inclusion.'} Global coverage excludes polar caps beyond 85°.</p><p>The test assumes independent, normally distributed errors with constant variance. Temporal autocorrelation and seasonality may understate uncertainty. A trend does not establish causation.</p><label>Significance threshold <select id="alpha">${[.01,.05,.1].map(a=>`<option value="${a}" ${alpha===a?'selected':''}>${a}</option>`).join('')}</select></label><p>${escape(phenomenon.why)}</p></div></details></div>`;
@@ -250,9 +264,10 @@ function download(kind:'report'|'csv') {
   if(!area||!phenomenon)return;
   const chosen=selectedVariables.map(id=>phenomenon!.variables.find(v=>v.id===id)!).filter(Boolean);
   const observations=chosen.map(v=>({v,rows:selectedRows(v),stats:analyze(selectedRows(v),alpha)}));
+  const spatialMethod=chosen.map(v=>isGiovanni(v)?`${v.name}: monthly series averaged over Giovanni's selected bounding box; no grid-cell values.`:area!.kind==='point'?'Point/grid-cell sample; not a regional mean.':'Area mean from cosine-latitude weighted sampled grid-cell centers.').join(' ');
   const content=kind==='csv'
     ? ['date,variable,value,unit,study_area,observation_type',...dates.slice(timeline.start,timeline.end+1).flatMap((date,i)=>observations.map(({v,rows})=>`${date},"${v.name.replaceAll('"','""')}",${Number.isFinite(rows[i]?.value)?rows[i].value:''},"${v.unit}","${area!.name.replaceAll('"','""')}",${area!.kind}`))].join('\n')
-    : `<!doctype html><meta charset="utf-8"><title>ASAN scientific summary</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:850px;margin:48px auto;padding:0 24px;color:#263235}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}small{color:#65706e}</style><h1>${escape(phenomenon.name)} · Trend summary</h1><p>${escape(area.name)} · ${areaLabel(area)} · ${dates[timeline.start]} to ${dates[timeline.end]}</p><p><b>Data sources:</b> ${chosen.map(v=>escape(v.name)+' ('+escape(backendSources.get(v.id)||v.source)+')').join(', ')}. All values are real NASA/NOAA data served by the ASAN API.</p><table><thead><tr><th>Variable</th><th>Trend / decade</th><th>p-value (t-test)</th><th>Mann-Kendall p</th><th>95% CI</th><th>Observations</th></tr></thead><tbody>${observations.map(({v,rows,stats})=>`<tr><td>${escape(v.name)} (${escape(v.unit)})</td><td>${signed(stats.slope)}</td><td>${number(stats.p,4)}</td><td>${number(stats.mk.p,4)}</td><td>${signed(stats.ci[0])} to ${signed(stats.ci[1])}</td><td>${stats.n} of ${rows.length}</td></tr>`).join('')}</tbody></table>${chosen.length>1?`<h2>Pairwise Pearson correlation</h2>${chosen.flatMap((a,i)=>chosen.slice(i+1).map(b=>{const c=correlate(selectedRows(a),selectedRows(b));return `<p>${escape(a.name)} and ${escape(b.name)}: r = ${number(c.r,3)}, p = ${number(c.p,4)} (n = ${c.n}). Association does not establish causation.</p>`})).join('')}`:''}<h2>Methods and limitations</h2>${chosen.filter(v=>caution[v.id]).map(v=>`<p><b>Caution (${escape(v.name)}):</b> ${escape(caution[v.id])}</p>`).join('')}<p>Linear least-squares regression against elapsed time; slopes are expressed per decade. Two-sided Student t test of zero slope with n − 2 degrees of freedom; confidence interval is 95%. Missing values are excluded. ${area.kind==='point'?'Point/grid-cell sample; not a regional mean.':'Area mean from cosine-latitude weighted sampled grid-cell centers.'} The test assumes independent errors; temporal autocorrelation can understate uncertainty. ${anomalies?'Monthly anomalies use the 2015–2024 calendar-month baseline.':'Seasonality has not been removed.'} Correlations are unadjusted and descriptive.</p><small>Generated by ASAN Earth System Explorer · ${new Date().toISOString()}</small>`;
+    : `<!doctype html><meta charset="utf-8"><title>ASAN scientific summary</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:850px;margin:48px auto;padding:0 24px;color:#263235}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}small{color:#65706e}</style><h1>${escape(phenomenon.name)} · Trend summary</h1><p>${escape(area.name)} · ${areaLabel(area)} · ${dates[timeline.start]} to ${dates[timeline.end]}</p><p><b>Data sources:</b> ${chosen.map(v=>escape(v.name)+' ('+escape(backendSources.get(v.id)||v.source)+')').join(', ')}. All values are real NASA/NOAA data served by the ASAN API.</p><table><thead><tr><th>Variable</th><th>Trend / decade</th><th>p-value (t-test)</th><th>Mann-Kendall p</th><th>95% CI</th><th>Observations</th></tr></thead><tbody>${observations.map(({v,rows,stats})=>`<tr><td>${escape(v.name)} (${escape(v.unit)})</td><td>${signed(stats.slope)}</td><td>${number(stats.p,4)}</td><td>${number(stats.mk.p,4)}</td><td>${signed(stats.ci[0])} to ${signed(stats.ci[1])}</td><td>${stats.n} of ${rows.length}</td></tr>`).join('')}</tbody></table>${chosen.length>1?`<h2>Pairwise Pearson correlation</h2>${chosen.flatMap((a,i)=>chosen.slice(i+1).map(b=>{const c=correlate(selectedRows(a),selectedRows(b));return `<p>${escape(a.name)} and ${escape(b.name)}: r = ${number(c.r,3)}, p = ${number(c.p,4)} (n = ${c.n}). Association does not establish causation.</p>`})).join('')}`:''}<h2>Methods and limitations</h2>${chosen.filter(v=>caution[v.id]).map(v=>`<p><b>Caution (${escape(v.name)}):</b> ${escape(caution[v.id])}</p>`).join('')}<p>Linear least-squares regression against elapsed time; slopes are expressed per decade. Two-sided Student t test of zero slope with n − 2 degrees of freedom; confidence interval is 95%. Missing values are excluded. ${spatialMethod} The test assumes independent errors; temporal autocorrelation can understate uncertainty. ${anomalies?'Monthly anomalies use the 2015–2024 calendar-month baseline.':'Seasonality has not been removed.'} Correlations are unadjusted and descriptive.</p><small>Generated by ASAN Earth System Explorer · ${new Date().toISOString()}</small>`;
   const url=URL.createObjectURL(new Blob([content],{type:kind==='csv'?'text/csv':'text/html'})),link=document.createElement('a');link.href=url;link.download=`asan-${phenomenon.id}-${kind}.${kind==='csv'?'csv':'html'}`;link.click();URL.revokeObjectURL(url);
 }
 async function runScan() {
@@ -260,13 +275,15 @@ async function runScan() {
   const target = area, id = ++scanId, dialog = $<HTMLDialogElement>('#trends');
   scan = {status: 'loading', area: target, period: `${dateLabel(dates[timeline.start])} – ${dateLabel(dates[timeline.end])}`, results: [], field: new Map(), sources: new Map(), error: ''};
   renderScan(); if (!dialog.open) dialog.showModal();
-  const list = Object.values(allVariables), power = list.filter(v => v.source === 'NASA POWER'), sst = list.filter(v => v.apiId === 'sea_surface_temperature');
+  const list = Object.values(allVariables), power = list.filter(v => v.source === 'NASA POWER'), sst = list.filter(v => v.apiId === 'sea_surface_temperature'), giovanni = list.filter(v => v.provider === 'giovanni');
   try {
-    // One query carries every POWER variable; SST only exists over ocean, so its failure is expected on land and ignored.
-    const [p, o] = await Promise.allSettled([fetchBackendSeries(power, target, 16), fetchBackendSeries(sst, target, 16)]);
+    // One query carries every POWER variable; Giovanni runs one area-average workflow per dataset.
+    const period={startDate:dates[timeline.start],endDate:dates[timeline.end]};
+    const [p, o, g] = await Promise.allSettled([fetchBackendSeries(power, target, 16, period), fetchBackendSeries(sst, target, 16, period), fetchBackendSeries(giovanni, target, 3, period)]);
     if (id !== scanId) return;
     if (p.status === 'rejected') throw p.reason;
-    const parts = [p.value, ...(o.status === 'fulfilled' ? [o.value] : [])], used = [...power, ...(o.status === 'fulfilled' ? sst : [])];
+    const parts = [p.value, ...(o.status === 'fulfilled' ? [o.value] : []), ...(g.status === 'fulfilled' ? [g.value] : [])], used = [...power, ...(o.status === 'fulfilled' ? sst : []), ...(g.status === 'fulfilled' ? giovanni : [])];
+    if(g.status==='rejected')scan.warning=`NASA Giovanni variables were not included: ${(g.reason as Error).message}`;
     for (const part of parts) { for (const [k, v] of part.field) scan.field.set(k, v); for (const [k, v] of part.sources) scan.sources.set(k, v); for (const [k, rows] of part.series) seriesCache.set(JSON.stringify([k, target]), rows); }
     scan.results = scanTrends(used.map(v => ({id: v.id, name: v.name, unit: v.unit, source: scan.sources.get(v.id) || v.source, rows: seriesCache.get(JSON.stringify([v.id, target]))!})), timeline.start, timeline.end, alpha, anomalies);
     scan.status = 'done';
@@ -276,14 +293,14 @@ async function runScan() {
 function renderScan() {
   const d = $<HTMLDialogElement>('#trends'), n = scan.results.length, hits = scan.results.filter(r => r.significant).length;
   const row = (r: TrendResult) => `<button class="trend-row ${r.significant ? (r.slope > 0 ? 'up' : 'down') : 'flat'}" data-scan-variable="${r.id}"><span class="trend-name"><strong>${escape(r.name)}</strong><small>${escape(r.source)}</small></span><span class="trend-slope">${r.slope > 0 ? '▲' : '▼'} ${signed(r.slope)} <small>${escape(r.unit)}/decade</small></span><span class="trend-p"><small>Mann-Kendall p</small>${r.pMK < .001 ? '&lt; 0.001' : number(r.pMK, 3)}</span><span class="trend-verdict">${r.significant ? (r.slope > 0 ? 'Rising' : 'Falling') + (r.survivesCorrection ? ' ★' : '') : 'No clear trend'}</span></button>`;
-  d.innerHTML = `<div class="dialog-heading"><h2 id="trends-title">Trend scanner</h2>${button('close-trends', 'close', 'Close trend scanner')}</div><div class="settings-content">${scan.status === 'loading' ? '<p role="status">Testing every variable for this area against NASA and NOAA data… this takes about 10–20 seconds.</p>' : scan.status === 'error' ? `<p class="form-error" role="alert">${escape(scan.error)}</p>` : `<p><strong>${escape(scan.area?.name || '')}</strong> · ${escape(scan.period)}${anomalies ? ' · seasonal cycle removed' : ''}<br>${hits ? `<b>${hits} of ${n}</b> variables show a statistically significant trend (both tests, α = ${alpha}).` : `No variable shows a significant trend (α = ${alpha}) in this period.`} Click one to open its map and full analysis.</p><div class="trend-list">${scan.results.map(row).join('')}</div><p class="definition">Ranked by strength of evidence. Testing ${n} variables at once, about ${number(n * alpha, 1)} would look significant by pure chance; ★ marks trends that still pass after a Bonferroni correction (p &lt; ${number(alpha / Math.max(1, n), 4)}). Ten years is short, so treat results as leads to investigate, not conclusions.</p>`}</div>`;
+  d.innerHTML = `<div class="dialog-heading"><h2 id="trends-title">Trend scanner</h2>${button('close-trends', 'close', 'Close trend scanner')}</div><div class="settings-content">${scan.status === 'loading' ? '<p role="status">Testing every variable for this area against NASA and NOAA data. Giovanni area-average analyses can take up to a couple of minutes.</p>' : scan.status === 'error' ? `<p class="form-error" role="alert">${escape(scan.error)}</p>` : `<p><strong>${escape(scan.area?.name || '')}</strong> · ${escape(scan.period)}${anomalies ? ' · seasonal cycle removed' : ''}<br>${hits ? `<b>${hits} of ${n}</b> variables show a statistically significant trend (both tests, α = ${alpha}).` : `No variable shows a significant trend (α = ${alpha}) in this period.`} Click one to open its analysis.</p>${scan.warning?`<p class="form-error" role="status">${escape(scan.warning)}</p>`:''}<div class="trend-list">${scan.results.map(row).join('')}</div><p class="definition">Ranked by strength of evidence. Testing ${n} variables at once, about ${number(n * alpha, 1)} would look significant by pure chance; ★ marks trends that still pass after a Bonferroni correction (p &lt; ${number(alpha / Math.max(1, n), 4)}). Ten years is short, so treat results as leads to investigate, not conclusions.</p>`}</div>`;
 }
 function openScanResult(id: string) {
   const v = Object.values(allVariables).find(x => x.id === id);
   if (!v || !area || scan.area !== area) { toast('The study area changed. Run the scan again.'); return; }
   $<HTMLDialogElement>('#trends').close();
   phenomenon = phenomena.find(p => p.variables.some(x => x.id === id) && p.id === phenomenon?.id) || phenomena.find(p => p.variables.some(x => x.id === id))!;
-  requestId++; selectedVariables = [id]; variable = v; compare = false; hiddenLayers.clear(); dataLoading = false; dataError = '';
+  requestId++; selectedVariables = [id]; variable = v; compare = false; hiddenLayers.clear(); dataLoading = false; dataError = ''; dataErrorRecommendations = [];
   backendFields = scan.field; for (const [k, name] of scan.sources) backendSources.set(k, name);
   $('#welcome').hidden = true; renderControls(); updateLayer(); openAnalysis();
 }
@@ -320,10 +337,19 @@ function settings(periodOnly=false) {
   dialog.innerHTML=`<div class="dialog-heading"><h2 id="settings-title">${periodOnly?'Study period':'Map & exploration'}</h2>${button('close-settings','close','Close settings')}</div><div class="settings-content"><h3>Time range</h3>${periodControls()}<div id="period-error" class="form-error" role="status"></div><label>Playback steps<select id="playback-step"><option value="1" ${timeline.step===1?'selected':''}>Monthly</option><option value="12" ${timeline.step===12?'selected':''}>Annual</option></select></label><button class="text-button" data-action="reset-time">${icon('reset')}Reset to start of period</button>${periodOnly?'':`<h3>Basemap</h3><div class="settings-buttons"><button data-action="satellite">Satellite</button><button data-action="clean-map">Clean map</button></div><p class="imagery-note">Imagery is context only, not scientific data. Credits: Cesium ion / NASA GIBS / OpenStreetMap contributors.</p><h3>Map navigation</h3><p>Drag to rotate or pan. Scroll or pinch to zoom. Middle-drag / Ctrl-drag to tilt. Use the toolbar to zoom, tilt, reset, and select a study area.</p><p>Ctrl/⌘ K opens search. Escape closes the top overlay or cancels drawing. Polygon: click vertices, then Finish or right-click.</p>`}</div>`;
   dialog.showModal();
 }
-function changePeriod(control:HTMLElement) {
+function changePeriod(control:HTMLElement, changedInput:HTMLInputElement) {
   const a=control.querySelector<HTMLInputElement>('.period-start')!,b=control.querySelector<HTMLInputElement>('.period-end')!;
-  const start=dates.findIndex(d=>d.startsWith(a.value)&&a.value!==''),end=dates.findIndex(d=>d.startsWith(b.value)&&b.value!=='');
-  try{if(control.dataset.prefix){const temp={...timeline};setPeriod(temp,start,end);compareStart=start;compareEnd=end;}else setPeriod(timeline,start,end);renderControls();updateLayer();renderAnalysis();const err=$('#period-error');if(err)err.textContent='';}
+  let start=dates.findIndex(d=>d.startsWith(a.value)&&a.value!==''),end=dates.findIndex(d=>d.startsWith(b.value)&&b.value!=='');
+  try{
+    [start,end]=adjustPeriodEndpoint(start,end,changedInput.classList.contains('period-start')?'start':'end');
+    if(control.dataset.prefix){const temp={...timeline};setPeriod(temp,start,end);compareStart=start;compareEnd=end;}
+    else{
+      setPeriod(timeline,start,end);
+      a.value=dates[start].slice(0,7);b.value=dates[end].slice(0,7);
+      void refreshBackendData();
+    }
+    renderControls();updateLayer();renderAnalysis();const err=$('#period-error');if(err)err.textContent='';
+  }
   catch(e){const message=(e as Error).message,err=$('#period-error');if(err)err.textContent=message;else toast(message);}
 }
 function updatePlayback(){if(playTimer)clearInterval(playTimer);if(timeline.playing)playTimer=setInterval(()=>{timeline.index=advance(timeline);updateDate();},1000/timeline.speed);renderTimeline();for(const el of document.querySelectorAll<HTMLButtonElement>('#analysis [data-action=play]')){el.innerHTML=icon(timeline.playing?'pause':'play');el.setAttribute('aria-label',timeline.playing?'Pause playback':'Play historical dates');}}
@@ -371,7 +397,7 @@ document.addEventListener('change',event=>{
     if(!selectedVariables.length)selectedVariables=[variable.id];
     renderControls();updateLayer();renderAnalysis();void refreshBackendData();return;
   }
-  if(el.matches('.period-start,.period-end')){changePeriod(el.closest<HTMLElement>('.period-controls')!);return;}
+  if(el.matches('.period-start,.period-end')){changePeriod(el.closest<HTMLElement>('.period-controls')!,el);return;}
   if(el.dataset.layer){el.checked?hiddenLayers.delete(el.dataset.layer):hiddenLayers.add(el.dataset.layer);updateLayer();return;}
   if(el.id==='trend-map'){trendMap=el.checked;updateLayer();return;}
   switch(el.id){

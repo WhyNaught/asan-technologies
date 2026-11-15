@@ -2,6 +2,8 @@
 
 No credentials needed. Limits of the service: at most 10 composites per request, windows up to ~100 km, ~15 s per call.
 """
+from __future__ import annotations
+
 import json
 import math
 import threading
@@ -165,7 +167,7 @@ def start_series_job(lat: float, lon: float, half_km: int, start: date, end: dat
     threading.Thread(target=run, daemon=True).start()
     return job_id
 
-
+# fetch the status of a job from MODIS 
 def job_status(job_id: str) -> dict[str, Any]:
     job = _jobs.get(job_id)
     if job is None:
