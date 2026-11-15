@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from fastapi import FastAPI, Response
@@ -122,13 +123,18 @@ def send_data_query(query: Query) -> QueryResponse:
     else:
         data_mode = "synthetic"
 
+    # NASA POWER is one HTTP call per point; fetch points in parallel.
+    if has_nasa_power_variables:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            power_by_point = list(pool.map(
+                lambda c: fetch_monthly_parameters(c, months, nasa_power_parameters),
+                query.coordinates,
+            ))
+    else:
+        power_by_point = [{} for _ in query.coordinates]
+
     locations = []
-    for coordinate in query.coordinates:
-        nasa_power_data = (
-            fetch_monthly_parameters(coordinate, months, nasa_power_parameters)
-            if has_nasa_power_variables
-            else {}
-        )
+    for coordinate, nasa_power_data in zip(query.coordinates, power_by_point):
         series = []
         for variable in query.variables:
             metadata = VARIABLES[variable]
