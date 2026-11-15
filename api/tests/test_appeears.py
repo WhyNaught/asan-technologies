@@ -67,8 +67,8 @@ class AppEEARSTests(unittest.TestCase):
             patch.dict(
                 "os.environ",
                 {
-                    "APPEEARS_USERNAME": "test-user",
-                    "APPEEARS_PASSWORD": "test-password",
+                    "EARTHDATA_USERNAME": "test-user",
+                    "EARTHDATA_PASSWORD": "test-password",
                 },
             ),
             patch(

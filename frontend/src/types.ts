@@ -1,5 +1,5 @@
 export type LayerKind = 'scalar' | 'raster' | 'anomaly' | 'heat' | 'polygon' | 'point' | 'vector' | 'temporal';
-export interface Variable { id: string; name: string; unit: string; layer: LayerKind; global: boolean; domain: [number, number]; apiId: string; source: string; provider?: 'giovanni'; areaSeriesOnly?: boolean }
+export interface Variable { id: string; name: string; unit: string; layer: LayerKind; global: boolean; domain: [number, number]; apiId: string; source: string; topic: string; cadence: string; provider?: 'giovanni'; areaSeriesOnly?: boolean }
 export interface Phenomenon { id: string; name: string; category: string; description: string; why: string; variables: Variable[]; defaultVariable: string; scope: string; temporalResolution: 'monthly'; visualization: LayerKind; demo: boolean; featured: boolean }
 export type Coordinate = [number, number];
 export interface StudyArea { name: string; kind: 'point' | 'region' | 'global'; lon: number; lat: number; bounds?: [number, number, number, number]; polygon?: Coordinate[] }

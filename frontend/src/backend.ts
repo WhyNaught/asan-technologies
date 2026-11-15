@@ -103,7 +103,7 @@ async function availableVariables() {
 export async function fetchBackendSeries(
   variables: Variable[],
   area: StudyArea,
-  limit = 3,
+  limit = 16,
   period: DateRange = {startDate: dates[0], endDate: dates.at(-1)!},
 ): Promise<{ series: Map<string, Observation[]>; field: Map<string, Cell[][]>; sources: Map<string, string> }> {
   if (!variables.length || variables.length > limit || variables.some(v => !v.apiId)) throw new Error(`Select up to ${limit} variables supported by the connected API.`);
