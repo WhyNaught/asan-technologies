@@ -18,6 +18,15 @@ NASA_POWER_PARAMETERS = {
     UrbanVariable.AIR_TEMPERATURE: "T2M",
     UrbanVariable.RELATIVE_HUMIDITY: "RH2M",
     UrbanVariable.DEW_POINT_TEMPERATURE: "T2MDEW",
+    UrbanVariable.MAX_AIR_TEMPERATURE: "T2M_MAX",
+    UrbanVariable.PRECIPITATION: "PRECTOTCORR",
+    UrbanVariable.ROOT_ZONE_SOIL_WETNESS: "GWETROOT",
+    UrbanVariable.SURFACE_SOIL_WETNESS: "GWETTOP",
+    UrbanVariable.EVAPOTRANSPIRATION: "EVPTRNS",
+    UrbanVariable.SOLAR_IRRADIANCE: "ALLSKY_SFC_SW_DWN",
+    UrbanVariable.LONGWAVE_IRRADIANCE: "ALLSKY_SFC_LW_DWN",
+    UrbanVariable.WIND_SPEED: "WS10M",
+    UrbanVariable.SURFACE_ALBEDO: "ALLSKY_SRF_ALB",
 }
 
 # get the actual monthly params from NASA

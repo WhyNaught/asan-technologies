@@ -11,6 +11,17 @@ class UrbanVariable(str, Enum):
     RELATIVE_HUMIDITY = "relative_humidity"
     DEW_POINT_TEMPERATURE = "dew_point_temperature"
     NIGHT_LIGHT_RADIANCE = "night_light_radiance"
+    MAX_AIR_TEMPERATURE = "max_air_temperature"
+    PRECIPITATION = "precipitation"
+    ROOT_ZONE_SOIL_WETNESS = "root_zone_soil_wetness"
+    SURFACE_SOIL_WETNESS = "surface_soil_wetness"
+    EVAPOTRANSPIRATION = "evapotranspiration"
+    SOLAR_IRRADIANCE = "solar_irradiance"
+    LONGWAVE_IRRADIANCE = "longwave_irradiance"
+    WIND_SPEED = "wind_speed"
+    SURFACE_ALBEDO = "surface_albedo"
+    SEA_SURFACE_TEMPERATURE = "sea_surface_temperature"
+    NINO34_INDEX = "nino34_index"
 
 
 class AppEEARSProduct(str, Enum):
@@ -30,7 +41,7 @@ class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coordinates: list[Coordinate] = Field(min_length=1, max_length=50)
-    variables: list[UrbanVariable] = Field(min_length=1, max_length=5)
+    variables: list[UrbanVariable] = Field(min_length=1, max_length=12)
     start_date: date
     end_date: date
 
@@ -148,7 +159,7 @@ class VariableTimeSeries(BaseModel):
     label: str
     unit: str
     cadence: Literal["monthly"]
-    source: Literal["synthetic", "NASA POWER"]
+    source: Literal["synthetic", "NASA POWER", "NOAA HadISST", "NOAA CPC ONI"]
     observations: list[Observation]
 
 class LocationTimeSeries(BaseModel):
@@ -157,7 +168,7 @@ class LocationTimeSeries(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    data_mode: Literal["synthetic", "nasa_power", "mixed"]
+    data_mode: Literal["synthetic", "nasa_power", "mixed", "observational"]
     requested_period: tuple[date, date]
     locations: list[LocationTimeSeries]
 
@@ -168,7 +179,7 @@ class VariableMetadata(BaseModel):
     unit: str
     cadence: Literal["monthly"]
     description: str
-    source: Literal["synthetic", "NASA POWER"]
+    source: Literal["synthetic", "NASA POWER", "NOAA HadISST", "NOAA CPC ONI"]
     parameter: str | None = None
 
 
