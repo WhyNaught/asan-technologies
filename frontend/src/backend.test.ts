@@ -14,7 +14,7 @@ test('changing either study-period endpoint shifts the other endpoint to keep a 
 test('API adapter requests bounded area samples and returns a weighted dated series', async () => {
   const original=globalThis.fetch;let posted:Record<string,unknown>|undefined;
   globalThis.fetch=(async (input,init) => {
-    if(String(input).endsWith('/data/variables'))return new Response(JSON.stringify({variables:[{id:'earth_skin_temperature'}]}),{status:200});
+    if(String(input).endsWith('/data/variables'))return new Response(JSON.stringify({variables:Object.values(variables).filter(item=>item.provider!=='giovanni'&&item.apiId!=='modis_lst').map(item=>({id:item.apiId}))}),{status:200});
     posted=JSON.parse(String(init?.body));const query=posted as {coordinates:{latitude:number;longitude:number}[];variables:string[]};
     return new Response(JSON.stringify({data_mode:'nasa_power',locations:query.coordinates.map(coordinate=>({coordinate,series:query.variables.map(variable=>({variable,observations:Array.from({length:120},(_,i)=>({timestamp:new Date(Date.UTC(2015,i,1)).toISOString().slice(0,10),value:coordinate.latitude+i}))}))}))}),{status:200});
   }) as typeof fetch;
@@ -89,6 +89,32 @@ test('Giovanni API errors preserve actionable recommendations', async () => {
         return true;
       },
     );
+  }finally{globalThis.fetch=original;}
+});
+
+test('mixed Giovanni and gridded selections retain area series and allow more than three variables', async () => {
+  const original=globalThis.fetch;let connectedRequest:{variables:string[]}|undefined;
+  const chosen=[variables.giovanniPrecipitation,variables.temperature,variables.air,variables.humidity];
+  globalThis.fetch=(async (input,init) => {
+    const url=String(input);
+    if(url.endsWith('/data/variables'))return new Response(JSON.stringify({variables:chosen.slice(1).map(variable=>({id:variable.apiId}))}),{status:200});
+    if(url.endsWith('/data/giovanni/query'))return new Response(JSON.stringify({
+      source:'NASA Giovanni',observations:Array.from({length:120},(_,i)=>({timestamp:new Date(Date.UTC(2015,i,1)).toISOString().slice(0,10),value:i+20})),
+    }),{status:200});
+    assert.ok(url.endsWith('/data/query'));
+    connectedRequest=JSON.parse(String(init?.body)) as {variables:string[]};
+    const request=JSON.parse(String(init?.body)) as {coordinates:{latitude:number;longitude:number}[];variables:string[]};
+    return new Response(JSON.stringify({data_mode:'nasa_power',locations:request.coordinates.map(coordinate=>({
+      coordinate,series:request.variables.map(variable=>({variable,source:'NASA POWER',observations:Array.from({length:120},(_,i)=>({timestamp:new Date(Date.UTC(2015,i,1)).toISOString().slice(0,10),value:i+10}))})),
+    }))}),{status:200});
+  }) as typeof fetch;
+  try{
+    const result=await fetchBackendSeries(chosen,{name:'Test region',kind:'region',lon:0,lat:0,bounds:[-1,-1,1,1]});
+    assert.equal(connectedRequest!.variables.length,3);
+    assert.equal(result.series.size,4);
+    assert.equal(result.series.get(variables.giovanniPrecipitation.id)![0].value,20);
+    assert.equal(result.series.get(variables.temperature.id)![0].value,10);
+    assert.equal(result.field.has(variables.giovanniPrecipitation.id),false);
   }finally{globalThis.fetch=original;}
 });
 
