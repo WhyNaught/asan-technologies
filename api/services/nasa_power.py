@@ -14,7 +14,7 @@ NASA_POWER_MONTHLY_URL = (
 
 # any new variables we want from NASA POWER api should be added here 
 NASA_POWER_PARAMETERS = {
-    UrbanVariable.LAND_SURFACE_TEMPERATURE: "TS",
+    UrbanVariable.EARTH_SKIN_TEMPERATURE: "TS",
     UrbanVariable.AIR_TEMPERATURE: "T2M",
     UrbanVariable.RELATIVE_HUMIDITY: "RH2M",
     UrbanVariable.DEW_POINT_TEMPERATURE: "T2MDEW",

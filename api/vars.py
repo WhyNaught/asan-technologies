@@ -1,10 +1,9 @@
 from .models.queries import UrbanVariable
 
-# all variables we wish to expose to the user should be 
-# declared here using the below format 
+# All variables exposed by the monthly time-series endpoint.
 VARIABLES = {
-    UrbanVariable.LAND_SURFACE_TEMPERATURE: {
-        "label": "Land surface temperature",
+    UrbanVariable.EARTH_SKIN_TEMPERATURE: {
+        "label": "Earth skin temperature",
         "unit": "°C",
         "cadence": "monthly",
         "description": "Monthly earth skin temperature from NASA POWER.",

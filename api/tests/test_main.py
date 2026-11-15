@@ -80,7 +80,7 @@ class DataQueryTests(unittest.TestCase):
         self.assertEqual(
             {item["id"] for item in payload["variables"]},
             {
-                "land_surface_temperature",
+                "earth_skin_temperature",
                 "air_temperature",
                 "relative_humidity",
                 "dew_point_temperature",
@@ -148,7 +148,7 @@ class DataQueryTests(unittest.TestCase):
         response = self.client.get("/data/variables")
         self.assertEqual(response.status_code, 200)
         variables = {item["id"]: item for item in response.json()["variables"]}
-        self.assertEqual(variables["land_surface_temperature"]["parameter"], "TS")
+        self.assertEqual(variables["earth_skin_temperature"]["parameter"], "TS")
         self.assertEqual(variables["relative_humidity"]["parameter"], "RH2M")
         self.assertEqual(variables["dew_point_temperature"]["parameter"], "T2MDEW")
         self.assertEqual(variables["relative_humidity"]["unit"], "%")
@@ -168,7 +168,7 @@ class DataQueryTests(unittest.TestCase):
                 json={
                     "coordinates": [{"latitude": 40.7, "longitude": -74.0}],
                     "variables": [
-                        "land_surface_temperature",
+                        "earth_skin_temperature",
                         "relative_humidity",
                         "dew_point_temperature",
                     ],
