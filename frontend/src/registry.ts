@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Phenomenon, Variable } from './types';
 // Every variable comes from a connected real data source (`apiId` = the API variable or dataset id).
 const v = (id: string, name: string, unit: string, layer: Variable['layer'], domain: [number, number], apiId: string, source: string, topic: string): Variable => ({ id, name, unit, layer, domain, global: true, apiId, source, topic, cadence: 'monthly' });

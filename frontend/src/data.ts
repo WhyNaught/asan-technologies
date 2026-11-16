@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Cell, Coordinate, StudyArea } from './types';
 export const places: StudyArea[] = [
   { name: 'Phoenix, Arizona', kind: 'region', lon: -112.07, lat: 33.45, bounds: [-112.35, 33.2, -111.8, 33.75] },

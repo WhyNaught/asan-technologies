@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 """Real ocean observations from NOAA: HadISST sea surface temperature (ERDDAP) and the CPC Oceanic Niño Index."""
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 from __future__ import annotations
 
 from datetime import date

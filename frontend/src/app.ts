@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import './styles.css';
 import { phenomena, categories, variables as allVariables } from './registry';
 import { places, dates } from './data';

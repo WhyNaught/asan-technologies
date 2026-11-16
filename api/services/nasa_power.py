@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 from datetime import date
 from math import isfinite
 from typing import Any

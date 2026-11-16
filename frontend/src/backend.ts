@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import { dates, grid, inside } from './data';
 import type { Cell, Observation, StudyArea, Variable } from './types';
 

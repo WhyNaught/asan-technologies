@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 

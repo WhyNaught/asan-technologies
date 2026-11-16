@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Observation } from './types';
 import { analyze } from './analysis';
 export const number = (n: number, digits = 2) => Number.isFinite(n) ? n.toLocaleString('en', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';

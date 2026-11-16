@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyze, correlate, forecastAutoregression, forecastLinearTrend, mannKendall, monthlyAnomalies, seasonalCycle } from './analysis.ts';

@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 from .models.queries import UrbanVariable
 
 # All variables exposed by the monthly time-series endpoint.

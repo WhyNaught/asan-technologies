@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Cell, Observation, StudyArea } from './types';
 
 const apiBase = import.meta.env?.VITE_API_BASE_URL || '/api';

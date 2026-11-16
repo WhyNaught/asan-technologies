@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Viewer, ScreenSpaceEventHandler, Entity, Cartesian2, Cartesian3 } from 'cesium';
 import { loadCesium, basemap, terrain, ionToken, type Engine } from './providers';
 import { LayerRenderer } from './layers';

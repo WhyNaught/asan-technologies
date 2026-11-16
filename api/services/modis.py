@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 """Real 1 km MODIS land surface temperature (MOD11A2, 8-day, daytime) via NASA's ORNL DAAC MODIS web service.
 
 No credentials needed. Limits of the service: at most 10 composites per request, windows up to ~100 km, ~15 s per call.

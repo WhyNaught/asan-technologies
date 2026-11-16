@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 import unittest
 from contextlib import redirect_stderr
 from datetime import date

@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import jStat from 'jstat';
 import type { Observation } from './types';
 const YEAR = 365.25 * 86400000;

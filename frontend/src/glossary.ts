@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 // Plain-language definitions for students and general audiences, keyed by variable id.
 export const glossary: Record<string, string> = {
   'modis-lst': 'Daytime ground temperature measured from space by NASA’s MODIS sensor at about 1 km resolution (8-day composites; cloudy pixels are left out). Far sharper than the ~55 km model grid, so it shows hot and cool neighbourhoods inside a city.',

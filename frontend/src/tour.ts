@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 export interface TourStep { title: string; body: () => string; run?: () => Promise<void> | void }
 let steps: TourStep[] = [], index = 0, token = 0;
 const card = () => document.querySelector<HTMLElement>('#tour')!;

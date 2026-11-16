@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 export interface TimelineState { start: number; end: number; index: number; playing: boolean; speed: number; step: 1 | 12 }
 export function advance(t: TimelineState): number { return t.index + t.step > t.end ? t.start : Math.max(t.start, t.index + t.step); }
 export function adjustPeriodEndpoint(start: number, end: number, changed: 'start' | 'end'): [number, number] {

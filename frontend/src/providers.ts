@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type * as Cesium from 'cesium';
 export type Engine = typeof Cesium;
 export const ionToken = import.meta.env.NEXT_PUBLIC_CESIUM_ION_TOKEN || '';

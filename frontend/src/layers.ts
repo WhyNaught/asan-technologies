@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import type { Viewer, Entity } from 'cesium';
 import type { Engine } from './providers';
 import type { EnvironmentalLayer } from './types';

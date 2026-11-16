@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 const paths: Record<string, string> = {
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',

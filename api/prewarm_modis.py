@@ -1,3 +1,4 @@
+# SI was at least partially used to write the code in this file
 """Pre-compute the 10-year MODIS series for the demo cities so the demo is instant: python -m api.prewarm_modis"""
 import math
 from datetime import date

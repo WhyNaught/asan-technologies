@@ -1,3 +1,4 @@
+// SI was at least partially used to write the code in this file
 import { analyze, monthlyAnomalies } from './analysis';
 import type { Cell, Observation } from './types';
 
